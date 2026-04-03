@@ -1,0 +1,73 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id             String   @id @default(uuid())
+  name           String
+  email          String   @unique
+  password       String
+  monthlyBudget  Int?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  subscriptions Subscription[]
+}
+
+model Subscription {
+  id              String      @id @default(uuid())
+  name            String
+  price           Int
+  billingCycle    BillingType
+  category        Category    @default(OTHER)
+  startDate       DateTime
+  nextPaymentDate DateTime
+  isActive        Boolean     @default(true)
+  currency        String      @default("IDR")
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  payments  PaymentLog[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+}
+
+model PaymentLog {
+  id             String       @id @default(uuid())
+  amount         Int
+  paidAt         DateTime     @default(now())
+  note           String?
+
+  subscriptionId String
+  subscription   Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+
+  @@index([subscriptionId])
+}
+
+enum BillingType {
+  MONTHLY
+  YEARLY
+}
+
+enum Category {
+  ENTERTAINMENT
+  UTILITY
+  FINANCE
+  EDUCATION
+  GAMING
+  OTHER
+}
