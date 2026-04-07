@@ -27,6 +27,7 @@ export async function api<T = unknown>(
     method,
     headers: {
       "Content-Type": "application/json",
+      "ngrok-skip-browser-warning": "true",
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...headers,
     },

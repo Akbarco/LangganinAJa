@@ -1,6 +1,8 @@
 import { prisma } from "../lib/prisma.js";
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
+
+import { randomBytes } from "node:crypto";
 import { successResponse } from "../utils/response.js";
 import { AppError } from "../utils/AppError.js";
 import cookieOptions from "../utils/cookieOption.js";
@@ -87,3 +89,5 @@ export const logout = async (req, res) => {
   });
   return successResponse(res, "Logout successful");
 };
+
+

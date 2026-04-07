@@ -15,3 +15,4 @@ export const loginSchema = z.object({
     .transform((val) => val.toLowerCase().trim()),
   password: z.string().min(1, "Password must be at least 1 characters long"),
 });
+

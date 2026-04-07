@@ -62,7 +62,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     try {
       const res = await fetch(`${API_URL}/auth/login`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "ngrok-skip-browser-warning": "true" },
         body: JSON.stringify({ email, password }),
       });
 
@@ -89,7 +89,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     try {
       const res = await fetch(`${API_URL}/auth/register`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "ngrok-skip-browser-warning": "true" },
         body: JSON.stringify({ name, email, password }),
       });
 
@@ -114,6 +114,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          "ngrok-skip-browser-warning": "true",
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
       });
@@ -148,6 +149,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       method: "PUT",
       headers: {
         "Content-Type": "application/json",
+        "ngrok-skip-browser-warning": "true",
         Authorization: `Bearer ${token}`,
       },
       body: JSON.stringify({ name, email }),
@@ -166,6 +168,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       method: "PUT",
       headers: {
         "Content-Type": "application/json",
+        "ngrok-skip-browser-warning": "true",
         Authorization: `Bearer ${token}`,
       },
       body: JSON.stringify({ currentPassword, newPassword }),
@@ -182,6 +185,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       method: "PUT",
       headers: {
         "Content-Type": "application/json",
+        "ngrok-skip-browser-warning": "true",
         Authorization: `Bearer ${token}`,
       },
       body: JSON.stringify({ monthlyBudget: amount }),

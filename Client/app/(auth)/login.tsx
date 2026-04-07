@@ -11,7 +11,11 @@ import Toast from "react-native-toast-message";
 
 import Input from "@/components/ui/Input";
 import Button from "@/components/ui/Button";
-import { Spacing, FontSize, ThemeColors } from "@/constants";
+import {
+  Spacing,
+  FontSize,
+  ThemeColors,
+} from "@/constants";
 import { loginSchema, LoginInput } from "@/schemas/auth.schema";
 import { useAuthStore } from "@/store/authStore";
 import { useTheme } from "@/hooks/useTheme";
@@ -76,6 +80,9 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   title: { color: c.text, fontSize: FontSize.xxl, fontWeight: "600" },
   subtitle: { color: c.textSecondary, fontSize: FontSize.md, marginTop: Spacing.xs },
   form: { marginBottom: Spacing.xl },
+  dividerRow: { flexDirection: "row", alignItems: "center", gap: Spacing.sm, marginVertical: Spacing.md },
+  dividerLine: { flex: 1, height: 1, backgroundColor: c.borderLight },
+  dividerText: { color: c.textMuted, fontSize: FontSize.sm },
   footer: { flexDirection: "row", justifyContent: "center", alignItems: "center" },
   footerText: { color: c.textMuted, fontSize: FontSize.sm },
   footerLink: { color: c.primary, fontSize: FontSize.sm, fontWeight: "600" },

@@ -1,10 +1,43 @@
 import { Platform } from "react-native";
+import Constants from "expo-constants";
 
-// Web → localhost, HP/Emulator → IP WiFi PC kamu
-export const API_URL =
-  Platform.OS === "web"
-    ? "http://localhost:3000/api"
-    : "http://192.168.1.2:3000/api";
+const trimTrailingSlash = (value: string) => value.replace(/\/+$/, "");
+
+const getExpoHost = () => {
+  const fromExpoConfig = (
+    Constants as { expoConfig?: { hostUri?: string | null } }
+  ).expoConfig?.hostUri;
+  const fromManifest2 = (
+    Constants as { manifest2?: { extra?: { expoGo?: { debuggerHost?: string } } } }
+  ).manifest2?.extra?.expoGo?.debuggerHost;
+  const fromManifest = (
+    Constants as { manifest?: { debuggerHost?: string } }
+  ).manifest?.debuggerHost;
+
+  const hostUri = fromExpoConfig || fromManifest2 || fromManifest;
+  if (!hostUri || typeof hostUri !== "string") return null;
+
+  return hostUri.split(":")[0];
+};
+
+const resolveApiUrl = () => {
+  const envUrl =
+    typeof process !== "undefined" && process.env.EXPO_PUBLIC_API_URL
+      ? process.env.EXPO_PUBLIC_API_URL.trim()
+      : "";
+  if (envUrl) return trimTrailingSlash(envUrl);
+
+  if (Platform.OS === "web") return "http://localhost:3000/api";
+
+  const expoHost = getExpoHost();
+  if (expoHost) return `http://${expoHost}:3000/api`;
+
+  if (Platform.OS === "android") return "http://192.168.1.17:3000/api";
+
+  return "http://192.168.1.17:3000/api";
+};
+
+export const API_URL = resolveApiUrl();
 
 export interface ThemeColors {
   primary: string;
@@ -116,3 +149,5 @@ export const BorderRadius = {
   xl: 24,
   full: 999,
 } as const;
+
+export * from "./brands";

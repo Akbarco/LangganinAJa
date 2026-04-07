@@ -1,13 +1,15 @@
 import React from "react";
 import { Stack } from "expo-router";
-import { Colors } from "@/constants";
+import { useTheme } from "@/hooks/useTheme";
 
 export default function AuthLayout() {
+  const { colors } = useTheme();
+  
   return (
     <Stack
       screenOptions={{
         headerShown: false,
-        contentStyle: { backgroundColor: Colors.background },
+        contentStyle: { backgroundColor: colors.background },
         animation: "slide_from_right",
       }}
     >

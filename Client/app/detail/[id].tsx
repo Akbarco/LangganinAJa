@@ -2,7 +2,7 @@ import React, { useMemo } from "react";
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, Modal } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { router, useLocalSearchParams } from "expo-router";
-import { Ionicons } from "@expo/vector-icons";
+import { Ionicons, MaterialCommunityIcons, FontAwesome5 } from "@expo/vector-icons";
 import Toast from "react-native-toast-message";
 import { Image } from "react-native";
 
@@ -13,6 +13,7 @@ import { useReceiptStore } from "@/store/receiptStore";
 import { useTheme } from "@/hooks/useTheme";
 import { formatCurrency, formatDate, getDaysLabel, getUrgencyColor, getBillingLabel, daysUntil } from "@/lib/utils";
 import { getCategoryInfo } from "@/lib/categories";
+import { getBrandVisuals } from "@/constants/brands";
 
 export default function DetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -31,6 +32,7 @@ export default function DetailScreen() {
   if (!sub) return <SafeAreaView style={styles.container}><View style={styles.center}><Text style={styles.emptyText}>Langganan tidak ditemukan</Text><Button title="Kembali" onPress={() => router.back()} variant="ghost" /></View></SafeAreaView>;
 
   const catInfo = getCategoryInfo(sub.category, isDark);
+  const brandVisuals = getBrandVisuals(sub.name);
   const urgencyColor = getUrgencyColor(sub.nextPaymentDate);
   const days = daysUntil(sub.nextPaymentDate);
   const getUrgencyLabel = () => { if (days === 0) return "Hari ini"; if (days < 0) return `Terlambat ${Math.abs(days)} hari`; if (days === 1) return "Besok"; return `${days} hari lagi`; };
@@ -50,7 +52,19 @@ export default function DetailScreen() {
         </View>
 
         <View style={styles.heroSection}>
-          <View style={[styles.heroAvatar, { backgroundColor: catInfo.bgColor }]}><Ionicons name={catInfo.icon as any} size={32} color={catInfo.color} /></View>
+          <View style={[styles.heroAvatar, { backgroundColor: brandVisuals ? `${brandVisuals.color}25` : catInfo.bgColor }]}>
+            {brandVisuals ? (
+              brandVisuals.iconFamily === "MaterialCommunityIcons" ? (
+                <MaterialCommunityIcons name={brandVisuals.iconName as any} size={36} color={brandVisuals.color} />
+              ) : brandVisuals.iconFamily === "FontAwesome5" ? (
+                <FontAwesome5 name={brandVisuals.iconName as any} size={32} color={brandVisuals.color} />
+              ) : (
+                <Ionicons name={brandVisuals.iconName as any} size={32} color={brandVisuals.color} />
+              )
+            ) : (
+              <Ionicons name={catInfo.icon as any} size={32} color={catInfo.color} />
+            )}
+          </View>
           <Text style={styles.heroName}>{sub.name}</Text>
           <View style={styles.statusRow}>
             <View style={[styles.statusBadge, sub.isActive ? styles.activeBadge : styles.inactiveBadge]}>

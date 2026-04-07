@@ -67,22 +67,47 @@ export async function scheduleSubscriptionReminders(subscription: {
   for (const daysBefore of daysToNotif) {
     const triggerDate = new Date(nextDate);
     triggerDate.setDate(triggerDate.getDate() - daysBefore);
-    // Atur alarm bunyi jam 09:00 Pagi
-    triggerDate.setHours(9, 0, 0, 0);
 
-    // Kalau tanggal jatuhnya masih di masa depan, mari setel alarmnya!
+    // Cek apakah hari peringatan jatuh pada hari ini
+    const isToday =
+      triggerDate.getDate() === now.getDate() &&
+      triggerDate.getMonth() === now.getMonth() &&
+      triggerDate.getFullYear() === now.getFullYear();
+
+    if (isToday) {
+      // Jika jadwal notifikasi seharusnya berbunyi hari ini,
+      // jadwalkan untuk 10 detik dari sekarang agar bisa langsung dites/dilihat.
+      triggerDate.setTime(now.getTime() + 10 * 1000);
+    } else {
+      // Untuk hari-hari lainnya di masa depan, atur alarm bunyi jam 09:00 Pagi
+      triggerDate.setHours(9, 0, 0, 0);
+    }
+
+    // Kalau waktu trigger-nya masih di masa depan, mari setel notifikasinya!
     if (triggerDate > now) {
       let title = "";
-      if (daysBefore === 7) title = `H-7: Tagihan ${subscription.name} bentar lagi 🔔`;
-      if (daysBefore === 1) title = `Besok! Tagihan ${subscription.name} Jatuh Tempo 🚨`;
+      let body = "";
+
+      if (daysBefore === 7) {
+        title = `Tagihan ${subscription.name} Segera Tiba`;
+        body = `Hai! Sekadar mengingatkan, tagihan ${subscription.name} sebesar ${formatCurrency(
+          subscription.price,
+          subscription.currency
+        )} akan jatuh tempo 7 hari lagi. Pastikan saldo Anda mencukupi ya.`;
+      }
+
+      if (daysBefore === 1) {
+        title = `Peringatan: Tagihan ${subscription.name} Besok`;
+        body = `Tagihan langganan ${subscription.name} Anda senilai ${formatCurrency(
+          subscription.price,
+          subscription.currency
+        )} akan jatuh tempo esok hari. Mohon siapkan dana untuk menghindari kelambatan.`;
+      }
 
       await Notifications.scheduleNotificationAsync({
         content: {
           title,
-          body: `Jangan lupa siapin saldo sebesar ${formatCurrency(
-            subscription.price,
-            subscription.currency
-          )} buat perpanjang ya.`,
+          body,
           data: { subId: subscription.id },
           sound: true,
         },

@@ -1,11 +1,12 @@
 import React, { useMemo } from "react";
 import { View, Text, StyleSheet, TouchableOpacity } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
+import { Ionicons, MaterialCommunityIcons, FontAwesome5 } from "@expo/vector-icons";
 import { BorderRadius, FontSize, Spacing, ThemeColors } from "@/constants";
 import { useTheme } from "@/hooks/useTheme";
 import { Subscription } from "@/types";
 import { formatCurrency, formatDate, getDaysLabel, getUrgencyColor, getBillingLabel } from "@/lib/utils";
 import { getCategoryInfo } from "@/lib/categories";
+import { getBrandVisuals } from "@/constants/brands";
 
 interface SubscriptionCardProps {
   subscription: Subscription;
@@ -20,6 +21,8 @@ export default function SubscriptionCard({ subscription, onPress, onEdit, onDele
   const styles = useMemo(() => createStyles(colors, isDark), [colors, isDark]);
 
   const catInfo = getCategoryInfo(subscription.category, isDark);
+  const brandVisuals = getBrandVisuals(subscription.name);
+  
   const urgencyColor = getUrgencyColor(subscription.nextPaymentDate);
   const daysLabel = getDaysLabel(subscription.nextPaymentDate);
   const billingLabel = getBillingLabel(subscription.billingCycle);
@@ -38,8 +41,18 @@ export default function SubscriptionCard({ subscription, onPress, onEdit, onDele
     >
       <View style={styles.cardContent}>
         {/* Avatar: gray when inactive */}
-        <View style={[styles.avatar, { backgroundColor: isActive ? catInfo.bgColor : (isDark ? "#1E1E30" : "#ECEDF0") }]}>
-          <Ionicons name={catInfo.icon as any} size={22} color={isActive ? catInfo.color : grayedIcon} />
+        <View style={[styles.avatar, { backgroundColor: isActive ? (brandVisuals ? `${brandVisuals.color}25` : catInfo.bgColor) : (isDark ? "#1E1E30" : "#ECEDF0") }]}>
+          {brandVisuals ? (
+            brandVisuals.iconFamily === "MaterialCommunityIcons" ? (
+              <MaterialCommunityIcons name={brandVisuals.iconName as any} size={24} color={isActive ? brandVisuals.color : grayedIcon} />
+            ) : brandVisuals.iconFamily === "FontAwesome5" ? (
+              <FontAwesome5 name={brandVisuals.iconName as any} size={20} color={isActive ? brandVisuals.color : grayedIcon} />
+            ) : (
+              <Ionicons name={brandVisuals.iconName as any} size={22} color={isActive ? brandVisuals.color : grayedIcon} />
+            )
+          ) : (
+            <Ionicons name={catInfo.icon as any} size={22} color={isActive ? catInfo.color : grayedIcon} />
+          )}
         </View>
 
         <View style={styles.info}>
