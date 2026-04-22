@@ -8,11 +8,12 @@ const getExpoHost = () => {
     Constants as { expoConfig?: { hostUri?: string | null } }
   ).expoConfig?.hostUri;
   const fromManifest2 = (
-    Constants as { manifest2?: { extra?: { expoGo?: { debuggerHost?: string } } } }
+    Constants as {
+      manifest2?: { extra?: { expoGo?: { debuggerHost?: string } } };
+    }
   ).manifest2?.extra?.expoGo?.debuggerHost;
-  const fromManifest = (
-    Constants as { manifest?: { debuggerHost?: string } }
-  ).manifest?.debuggerHost;
+  const fromManifest = (Constants as { manifest?: { debuggerHost?: string } })
+    .manifest?.debuggerHost;
 
   const hostUri = fromExpoConfig || fromManifest2 || fromManifest;
   if (!hostUri || typeof hostUri !== "string") return null;
