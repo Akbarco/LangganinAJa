@@ -5,7 +5,6 @@ import {
   StyleSheet,
   FlatList,
   RefreshControl,
-  Alert,
   ActivityIndicator,
   TextInput,
   TouchableOpacity,
@@ -17,6 +16,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import Toast from "react-native-toast-message";
 
+import ConfirmDialog from "@/components/ui/ConfirmDialog";
 import SummaryCards from "@/components/SummaryCards";
 import SubscriptionCard from "@/components/SubscriptionCard";
 import { Spacing, FontSize, BorderRadius, ThemeColors } from "@/constants";
@@ -80,6 +80,8 @@ export default function HomeScreen() {
   const [activeFilter, setActiveFilter] = useState<FilterType>("all");
   const [activeSort, setActiveSort] = useState<SortType>("newest");
   const [isFilterModalVisible, setIsFilterModalVisible] = useState(false);
+  const [pendingDelete, setPendingDelete] = useState<Subscription | null>(null);
+  const [pendingToggle, setPendingToggle] = useState<Subscription | null>(null);
 
   useFocusEffect(
     useCallback(() => {
@@ -163,30 +165,27 @@ export default function HomeScreen() {
     setIsFilterModalVisible(false);
   };
 
-  const handleDelete = (sub: Subscription) => {
-    Alert.alert("Hapus Langganan", `Yakin ingin menghapus "${sub.name}"?`, [
-      { text: "Batal", style: "cancel" },
-      {
-        text: "Hapus",
-        style: "destructive",
-        onPress: async () => {
-          try {
-            await deleteSubscription(sub.id);
-            await fetchSummary();
-            Toast.show({
-              type: "success",
-              text1: "Berhasil",
-              text2: `${sub.name} telah dihapus`,
-            });
-          } catch (e: any) {
-            Toast.show({ type: "error", text1: "Gagal", text2: e.message });
-          }
-        },
-      },
-    ]);
+  const confirmDelete = async () => {
+    if (!pendingDelete) return;
+    const sub = pendingDelete;
+    setPendingDelete(null);
+    try {
+      await deleteSubscription(sub.id);
+      await fetchSummary();
+      Toast.show({
+        type: "success",
+        text1: "Berhasil",
+        text2: `${sub.name} telah dihapus`,
+      });
+    } catch (e: any) {
+      Toast.show({ type: "error", text1: "Gagal", text2: e.message });
+    }
   };
 
-  const handleToggle = async (sub: Subscription) => {
+  const confirmToggle = async () => {
+    if (!pendingToggle) return;
+    const sub = pendingToggle;
+    setPendingToggle(null);
     try {
       await toggleActive(sub.id, !sub.isActive);
       await fetchSummary();
@@ -432,8 +431,8 @@ export default function HomeScreen() {
             subscription={item}
             onPress={() => router.push(`/detail/${item.id}` as any)}
             onEdit={() => router.push(`/edit/${item.id}` as any)}
-            onDelete={() => handleDelete(item)}
-            onToggle={() => handleToggle(item)}
+            onDelete={() => setPendingDelete(item)}
+            onToggle={() => setPendingToggle(item)}
           />
         )}
         ListHeaderComponent={listHeader}
@@ -449,6 +448,52 @@ export default function HomeScreen() {
         keyboardDismissMode="on-drag"
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.listContent}
+      />
+      <ConfirmDialog
+        visible={!!pendingDelete}
+        title="Hapus Langganan"
+        message={
+          pendingDelete
+            ? `Yakin ingin menghapus "${pendingDelete.name}"? Data pembayaran terkait juga ikut terhapus.`
+            : ""
+        }
+        icon="trash-outline"
+        onClose={() => setPendingDelete(null)}
+        actions={[
+          {
+            label: "Batal",
+            variant: "secondary",
+            onPress: () => setPendingDelete(null),
+          },
+          { label: "Hapus", variant: "danger", onPress: confirmDelete },
+        ]}
+      />
+      <ConfirmDialog
+        visible={!!pendingToggle}
+        title={
+          pendingToggle?.isActive ? "Nonaktifkan Langganan" : "Aktifkan Langganan"
+        }
+        message={
+          pendingToggle
+            ? `Yakin ingin ${
+                pendingToggle.isActive ? "menonaktifkan" : "mengaktifkan"
+              } "${pendingToggle.name}"?`
+            : ""
+        }
+        icon={pendingToggle?.isActive ? "pause-circle-outline" : "play-circle-outline"}
+        onClose={() => setPendingToggle(null)}
+        actions={[
+          {
+            label: "Batal",
+            variant: "secondary",
+            onPress: () => setPendingToggle(null),
+          },
+          {
+            label: pendingToggle?.isActive ? "Nonaktifkan" : "Aktifkan",
+            variant: pendingToggle?.isActive ? "danger" : "success",
+            onPress: confirmToggle,
+          },
+        ]}
       />
     </SafeAreaView>
   );

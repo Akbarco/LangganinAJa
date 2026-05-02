@@ -6,8 +6,17 @@ import {
   UpdateSubscriptionPayload,
   PaymentLog,
 } from "@/types";
-import { apiGet, apiPost, apiPut, apiDelete } from "@/lib/api";
+import {
+  createLocalSubscription,
+  deleteLocalSubscription,
+  getLocalPaymentHistory,
+  getLocalSubscriptions,
+  getLocalSummary,
+  markLocalSubscriptionAsPaid,
+  updateLocalSubscription,
+} from "@/lib/localDb";
 import { scheduleSubscriptionReminders, cancelSubscriptionReminders } from "@/lib/notifications";
+import { useAuthStore } from "@/store/authStore";
 
 interface SubscriptionState {
   subscriptions: Subscription[];
@@ -38,8 +47,14 @@ export const useSubscriptionStore = create<SubscriptionState>((set, get) => ({
   fetchSubscriptions: async () => {
     set({ isLoading: true });
     try {
-      const res = await apiGet<Subscription[]>("/subscriptions");
-      set({ subscriptions: res.data, isLoading: false });
+      const userId = useAuthStore.getState().user?.id;
+      if (!userId) {
+        set({ subscriptions: [], isLoading: false });
+        return;
+      }
+
+      const subscriptions = await getLocalSubscriptions(userId);
+      set({ subscriptions, isLoading: false });
     } catch (error) {
       set({ isLoading: false });
       throw error;
@@ -48,59 +63,77 @@ export const useSubscriptionStore = create<SubscriptionState>((set, get) => ({
 
   fetchSummary: async () => {
     try {
-      const res = await apiGet<SubscriptionSummary>("/subscriptions/summary");
-      set({ summary: res.data });
+      const userId = useAuthStore.getState().user?.id;
+      if (!userId) {
+        set({ summary: null });
+        return;
+      }
+
+      const summary = await getLocalSummary(userId);
+      set({ summary });
     } catch {
       // Silently fail for summary
     }
   },
 
   createSubscription: async (payload: CreateSubscriptionPayload) => {
-    const res = await apiPost<Subscription>("/subscriptions", payload as any);
+    const userId = useAuthStore.getState().user?.id;
+    if (!userId) throw new Error("User belum login");
+
+    const subscription = await createLocalSubscription(userId, payload);
     set((state) => ({
-      subscriptions: [res.data, ...state.subscriptions],
+      subscriptions: [subscription, ...state.subscriptions],
     }));
 
     // [FITUR BARU] Jadwalkan notifikasi H-7 dan H-1
     try {
       await scheduleSubscriptionReminders({
-        id: res.data.id,
-        name: res.data.name,
-        price: res.data.price,
-        currency: res.data.currency as any || "IDR",
-        nextPaymentDate: res.data.nextPaymentDate,
+        id: subscription.id,
+        name: subscription.name,
+        price: subscription.price,
+        currency: subscription.currency as any || "IDR",
+        nextPaymentDate: subscription.nextPaymentDate,
       });
     } catch (e) {
       console.log("Gagal buat notifikasi", e);
     }
 
-    return res.data;
+    await get().fetchSummary();
+    return subscription;
   },
 
   updateSubscription: async (id: string, payload: UpdateSubscriptionPayload) => {
-    const res = await apiPut<Subscription>(`/subscriptions/${id}`, payload as any);
+    const userId = useAuthStore.getState().user?.id;
+    if (!userId) throw new Error("User belum login");
+
+    const subscription = await updateLocalSubscription(userId, id, payload);
     set((state) => ({
       subscriptions: state.subscriptions.map((s) =>
-        s.id === id ? res.data : s
+        s.id === id ? subscription : s
       ),
     }));
 
     // Update notifikasi jika datanya berubah
     try {
       await scheduleSubscriptionReminders({
-        id: res.data.id,
-        name: res.data.name,
-        price: res.data.price,
-        currency: res.data.currency as any || "IDR",
-        nextPaymentDate: res.data.nextPaymentDate,
+        id: subscription.id,
+        name: subscription.name,
+        price: subscription.price,
+        currency: subscription.currency as any || "IDR",
+        nextPaymentDate: subscription.nextPaymentDate,
       });
     } catch (e) {
       console.log("Gagal buat notifikasi", e);
     }
+
+    await get().fetchSummary();
   },
 
   deleteSubscription: async (id: string) => {
-    await apiDelete(`/subscriptions/${id}`);
+    const userId = useAuthStore.getState().user?.id;
+    if (!userId) throw new Error("User belum login");
+
+    await deleteLocalSubscription(userId, id);
     set((state) => ({
       subscriptions: state.subscriptions.filter((s) => s.id !== id),
     }));
@@ -111,6 +144,7 @@ export const useSubscriptionStore = create<SubscriptionState>((set, get) => ({
     } catch (e) {
       console.log("Gagal membatalkan notifikasi", e);
     }
+    await get().fetchSummary();
   },
 
   toggleActive: async (id: string, isActive: boolean) => {
@@ -118,7 +152,10 @@ export const useSubscriptionStore = create<SubscriptionState>((set, get) => ({
   },
 
   markAsPaid: async (id: string, note?: string) => {
-    await apiPost(`/subscriptions/${id}/pay`, { note } as any);
+    const userId = useAuthStore.getState().user?.id;
+    if (!userId) throw new Error("User belum login");
+
+    await markLocalSubscriptionAsPaid(userId, id, note);
     // Refresh subscription list to get updated nextPaymentDate
     await get().fetchSubscriptions();
     await get().fetchSummary();
@@ -126,8 +163,14 @@ export const useSubscriptionStore = create<SubscriptionState>((set, get) => ({
 
   fetchPaymentHistory: async (id: string) => {
     try {
-      const res = await apiGet<PaymentLog[]>(`/subscriptions/${id}/payments`);
-      set({ paymentHistory: res.data });
+      const userId = useAuthStore.getState().user?.id;
+      if (!userId) {
+        set({ paymentHistory: [] });
+        return;
+      }
+
+      const paymentHistory = await getLocalPaymentHistory(userId, id);
+      set({ paymentHistory });
     } catch {
       set({ paymentHistory: [] });
     }

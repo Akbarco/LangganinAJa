@@ -1,7 +1,14 @@
 import { create } from "zustand";
 import { storage } from "@/lib/storage";
-import { User, ApiResponse, LoginResponse } from "@/types";
-import { API_URL } from "@/constants";
+import { User } from "@/types";
+import {
+  changeLocalPassword,
+  getDb,
+  loginLocalUser,
+  registerLocalUser,
+  setLocalBudget,
+  updateLocalProfile,
+} from "@/lib/localDb";
 
 interface AuthState {
   user: User | null;
@@ -35,6 +42,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   initialize: async () => {
     try {
+      await getDb();
       const token = await storage.getItem("token");
       const userStr = await storage.getItem("user");
       const pin = await storage.getItem("appPin");
@@ -60,19 +68,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   login: async (email: string, password: string) => {
     set({ isLoading: true });
     try {
-      const res = await fetch(`${API_URL}/auth/login`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "ngrok-skip-browser-warning": "true" },
-        body: JSON.stringify({ email, password }),
-      });
-
-      const data: ApiResponse<LoginResponse> = await res.json();
-
-      if (!res.ok || !data.success) {
-        throw new Error(data.message || "Login gagal");
-      }
-
-      const { user, token } = data.data;
+      const { user, token } = await loginLocalUser(email, password);
 
       await storage.setItem("token", token);
       await storage.setItem("user", JSON.stringify(user));
@@ -87,18 +83,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   register: async (name: string, email: string, password: string) => {
     set({ isLoading: true });
     try {
-      const res = await fetch(`${API_URL}/auth/register`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "ngrok-skip-browser-warning": "true" },
-        body: JSON.stringify({ name, email, password }),
-      });
-
-      const data: ApiResponse<User> = await res.json();
-
-      if (!res.ok || !data.success) {
-        throw new Error(data.message || "Registrasi gagal");
-      }
-
+      await registerLocalUser(name, email, password);
       set({ isLoading: false });
     } catch (error: any) {
       set({ isLoading: false });
@@ -107,21 +92,6 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   logout: async () => {
-    try {
-      const token = get().token;
-      // Call server logout
-      await fetch(`${API_URL}/auth/logout`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "ngrok-skip-browser-warning": "true",
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-      });
-    } catch {
-      // Ignore errors — still clear local state
-    }
-
     await storage.deleteItem("token");
     await storage.deleteItem("user");
     await storage.deleteItem("appPin");
@@ -144,57 +114,24 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   updateProfile: async (name?: string, email?: string) => {
-    const token = get().token;
-    const res = await fetch(`${API_URL}/auth/profile`, {
-      method: "PUT",
-      headers: {
-        "Content-Type": "application/json",
-        "ngrok-skip-browser-warning": "true",
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({ name, email }),
-    });
-    const data: ApiResponse<User> = await res.json();
-    if (!res.ok || !data.success) {
-      throw new Error(data.message || "Gagal update profil");
-    }
-    await storage.setItem("user", JSON.stringify(data.data));
-    set({ user: data.data });
+    const user = get().user;
+    if (!user) throw new Error("User belum login");
+    const updated = await updateLocalProfile(user.id, name, email);
+    await storage.setItem("user", JSON.stringify(updated));
+    set({ user: updated });
   },
 
   changePassword: async (currentPassword: string, newPassword: string) => {
-    const token = get().token;
-    const res = await fetch(`${API_URL}/auth/change-password`, {
-      method: "PUT",
-      headers: {
-        "Content-Type": "application/json",
-        "ngrok-skip-browser-warning": "true",
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({ currentPassword, newPassword }),
-    });
-    const data: ApiResponse = await res.json();
-    if (!res.ok || !data.success) {
-      throw new Error(data.message || "Gagal ganti password");
-    }
+    const user = get().user;
+    if (!user) throw new Error("User belum login");
+    await changeLocalPassword(user.id, currentPassword, newPassword);
   },
 
   setBudget: async (amount: number | null) => {
-    const token = get().token;
-    const res = await fetch(`${API_URL}/auth/budget`, {
-      method: "PUT",
-      headers: {
-        "Content-Type": "application/json",
-        "ngrok-skip-browser-warning": "true",
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({ monthlyBudget: amount }),
-    });
-    const data: ApiResponse<User> = await res.json();
-    if (!res.ok || !data.success) {
-      throw new Error(data.message || "Gagal set budget");
-    }
-    await storage.setItem("user", JSON.stringify(data.data));
-    set({ user: data.data });
+    const user = get().user;
+    if (!user) throw new Error("User belum login");
+    const updated = await setLocalBudget(user.id, amount);
+    await storage.setItem("user", JSON.stringify(updated));
+    set({ user: updated });
   },
 }));

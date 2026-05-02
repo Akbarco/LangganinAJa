@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <rect width="1024" height="1024" rx="0" fill="#FDFDFD"/>
+  <g transform="translate(100 108) rotate(13 412 404)">
+    <path
+      d="M262 28 624 118c58 14 94 72 80 130L586 730c-14 58-72 94-130 80L94 720C36 706 0 648 14 590L132 108C146 50 204 14 262 28Z"
+      fill="#0A5AF2"
+    />
+    <path
+      d="M295 214 550 276c44 11 71 55 60 99l-57 234c-11 44-55 71-99 60L199 607c-44-11-71-55-60-99l57-234c11-44 55-71 99-60Z"
+      fill="#FFFFFF"
+    />
+    <path
+      d="M302 182 557 244c44 11 71 55 60 99l-16 67-414-101 16-67c11-44 55-71 99-60Z"
+      fill="#0A5AF2"
+    />
+    <rect x="290" y="125" width="46" height="119" rx="23" fill="#FFFFFF"/>
+    <rect x="489" y="174" width="46" height="119" rx="23" fill="#FFFFFF"/>
+    <path
+      d="M288 453 383 556 572 369"
+      fill="none"
+      stroke="#FDB209"
+      stroke-width="74"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+    />
+  </g>
+</svg>

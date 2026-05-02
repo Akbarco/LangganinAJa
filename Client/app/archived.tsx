@@ -1,10 +1,11 @@
 import React, { useMemo } from "react";
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, Alert } from "react-native";
+import { View, Text, StyleSheet, FlatList, TouchableOpacity } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { router } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import Toast from "react-native-toast-message";
 
+import ConfirmDialog from "@/components/ui/ConfirmDialog";
 import SubscriptionCard from "@/components/SubscriptionCard";
 import { Spacing, FontSize, BorderRadius, ThemeColors } from "@/constants";
 import { useSubscriptionStore } from "@/store/subscriptionStore";
@@ -15,16 +16,23 @@ export default function ArchivedScreen() {
   const { subscriptions, deleteSubscription, toggleActive, fetchSummary } = useSubscriptionStore();
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
+  const [pendingDelete, setPendingDelete] = React.useState<Subscription | null>(null);
+  const [pendingActivate, setPendingActivate] = React.useState<Subscription | null>(null);
 
   const archivedSubscriptions = useMemo(() => subscriptions.filter((s) => !s.isActive), [subscriptions]);
 
-  const handleDelete = (sub: Subscription) => {
-    Alert.alert("Hapus Permanen", `Yakin ingin menghapus permanen "${sub.name}" dari histori?`, [
-      { text: "Batal", style: "cancel" },
-      { text: "Hapus", style: "destructive", onPress: async () => { try { await deleteSubscription(sub.id); await fetchSummary(); Toast.show({ type: "success", text1: "Dihapus Permanen", text2: `${sub.name} telah dihapus` }); } catch (e: any) { Toast.show({ type: "error", text1: "Gagal menghapus", text2: e.message }); } } },
-    ]);
+  const confirmDelete = async () => {
+    if (!pendingDelete) return;
+    const sub = pendingDelete;
+    setPendingDelete(null);
+    try { await deleteSubscription(sub.id); await fetchSummary(); Toast.show({ type: "success", text1: "Dihapus Permanen", text2: `${sub.name} telah dihapus` }); } catch (e: any) { Toast.show({ type: "error", text1: "Gagal menghapus", text2: e.message }); }
   };
-  const handleToggle = async (sub: Subscription) => { try { await toggleActive(sub.id, true); await fetchSummary(); Toast.show({ type: "success", text1: "Diaktifkan Kembali", text2: `${sub.name} kini aktif lagi` }); } catch (e: any) { Toast.show({ type: "error", text1: "Gagal", text2: e.message }); } };
+  const confirmActivate = async () => {
+    if (!pendingActivate) return;
+    const sub = pendingActivate;
+    setPendingActivate(null);
+    try { await toggleActive(sub.id, true); await fetchSummary(); Toast.show({ type: "success", text1: "Diaktifkan Kembali", text2: `${sub.name} kini aktif lagi` }); } catch (e: any) { Toast.show({ type: "error", text1: "Gagal", text2: e.message }); }
+  };
 
   const renderEmpty = () => (
     <View style={styles.emptyContainer}>
@@ -42,8 +50,30 @@ export default function ArchivedScreen() {
         <View style={{ width: 24 }} />
       </View>
       <FlatList data={archivedSubscriptions} keyExtractor={(item) => item.id}
-        renderItem={({ item }) => (<SubscriptionCard subscription={item} onPress={() => router.push(`/detail/${item.id}` as any)} onEdit={() => router.push(`/edit/${item.id}` as any)} onDelete={() => handleDelete(item)} onToggle={() => handleToggle(item)} />)}
+        renderItem={({ item }) => (<SubscriptionCard subscription={item} onPress={() => router.push(`/detail/${item.id}` as any)} onEdit={() => router.push(`/edit/${item.id}` as any)} onDelete={() => setPendingDelete(item)} onToggle={() => setPendingActivate(item)} />)}
         ListEmptyComponent={renderEmpty} contentContainerStyle={styles.listContent} showsVerticalScrollIndicator={false}
+      />
+      <ConfirmDialog
+        visible={!!pendingDelete}
+        title="Hapus Permanen"
+        message={pendingDelete ? `Yakin ingin menghapus permanen "${pendingDelete.name}" dari histori?` : ""}
+        icon="trash-outline"
+        onClose={() => setPendingDelete(null)}
+        actions={[
+          { label: "Batal", variant: "secondary", onPress: () => setPendingDelete(null) },
+          { label: "Hapus", variant: "danger", onPress: confirmDelete },
+        ]}
+      />
+      <ConfirmDialog
+        visible={!!pendingActivate}
+        title="Aktifkan Langganan"
+        message={pendingActivate ? `Yakin ingin mengaktifkan kembali "${pendingActivate.name}"?` : ""}
+        icon="play-circle-outline"
+        onClose={() => setPendingActivate(null)}
+        actions={[
+          { label: "Batal", variant: "secondary", onPress: () => setPendingActivate(null) },
+          { label: "Aktifkan", variant: "success", onPress: confirmActivate },
+        ]}
       />
     </SafeAreaView>
   );

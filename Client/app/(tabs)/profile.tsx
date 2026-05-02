@@ -1,5 +1,5 @@
 import React, { useMemo } from "react";
-import { View, Text, StyleSheet, Alert, Switch, Modal, TextInput, TouchableOpacity, ScrollView } from "react-native";
+import { View, Text, StyleSheet, Switch, Modal, TextInput, TouchableOpacity, ScrollView } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import Toast from "react-native-toast-message";
@@ -8,11 +8,13 @@ import * as Sharing from "expo-sharing";
 import { router } from "expo-router";
 
 import Button from "@/components/ui/Button";
+import ConfirmDialog from "@/components/ui/ConfirmDialog";
 import { Spacing, FontSize, BorderRadius, ThemeColors } from "@/constants";
 import { useAuthStore } from "@/store/authStore";
 import { useSubscriptionStore } from "@/store/subscriptionStore";
 import { useTheme } from "@/hooks/useTheme";
-import { formatDate } from "@/lib/utils";
+import { formatDate, formatRupiahInput, parseRupiahInput } from "@/lib/utils";
+import { exportLocalDatabase } from "@/lib/localDb";
 
 export default function ProfileScreen() {
   const { user, logout, isLoading, isAppLockEnabled, toggleAppLock, appPin, setAppPin, updateProfile, changePassword, setBudget } = useAuthStore();
@@ -21,6 +23,8 @@ export default function ProfileScreen() {
   const styles = useMemo(() => createStyles(colors, isDark), [colors, isDark]);
 
   const [isExporting, setIsExporting] = React.useState(false);
+  const [isExportingDb, setIsExportingDb] = React.useState(false);
+  const [isLogoutDialogVisible, setIsLogoutDialogVisible] = React.useState(false);
   const [showPinModal, setShowPinModal] = React.useState(false);
   const [tempPin, setTempPin] = React.useState("");
   const [pinError, setPinError] = React.useState("");
@@ -42,8 +46,8 @@ export default function ProfileScreen() {
   const openEditProfile = () => { setEditName(user?.name || ""); setEditEmail(user?.email || ""); setIsEditProfileVisible(true); };
   const handleUpdateProfile = async () => { if (!editName.trim() || !editEmail.trim()) { Toast.show({ type: "error", text1: "Nama dan Email wajib diisi" }); return; } setIsSavingProfile(true); try { await updateProfile(editName, editEmail); setIsEditProfileVisible(false); Toast.show({ type: "success", text1: "Profil berhasil diperbarui" }); } catch (e: any) { Toast.show({ type: "error", text1: "Gagal", text2: e.message }); } finally { setIsSavingProfile(false); } };
   const handleUpdatePassword = async () => { if (!oldPassword || newPassword.length < 6) { Toast.show({ type: "error", text1: "Password lama wajib diisi", text2: "Password baru minimal 6 karakter" }); return; } setIsSavingPassword(true); try { await changePassword(oldPassword, newPassword); setIsPasswordVisible(false); setOldPassword(""); setNewPassword(""); Toast.show({ type: "success", text1: "Password berhasil diganti" }); } catch (e: any) { Toast.show({ type: "error", text1: "Gagal", text2: e.message }); } finally { setIsSavingPassword(false); } };
-  const openBudgetModal = () => { setTempBudget(user?.monthlyBudget ? user.monthlyBudget.toString() : ""); setIsBudgetVisible(true); };
-  const handleSetBudget = async () => { setIsSavingBudget(true); try { const s = tempBudget.replace(/[^0-9]/g, ""); await setBudget(s ? Number(s) : null); setIsBudgetVisible(false); Toast.show({ type: "success", text1: "Batas pengeluaran diperbarui" }); } catch (e: any) { Toast.show({ type: "error", text1: "Gagal", text2: e.message }); } finally { setIsSavingBudget(false); } };
+  const openBudgetModal = () => { setTempBudget(formatRupiahInput(user?.monthlyBudget)); setIsBudgetVisible(true); };
+  const handleSetBudget = async () => { setIsSavingBudget(true); try { await setBudget(parseRupiahInput(tempBudget) ?? null); setIsBudgetVisible(false); Toast.show({ type: "success", text1: "Batas pengeluaran diperbarui" }); } catch (e: any) { Toast.show({ type: "error", text1: "Gagal", text2: e.message }); } finally { setIsSavingBudget(false); } };
   const handleToggleLock = async (value: boolean) => { if (value) { setTempPin(""); setPinError(""); setShowPinModal(true); } else { await toggleAppLock(false); await setAppPin(null); Toast.show({ type: "success", text1: "Kunci Aplikasi Dinonaktifkan" }); } };
   const handleSavePin = async () => { if (tempPin.length !== 4) { setPinError("PIN harus 4 digit angka"); return; } await setAppPin(tempPin); await toggleAppLock(true); setShowPinModal(false); Toast.show({ type: "success", text1: "Berhasil", text2: "Kunci Aplikasi Diaktifkan" }); };
 
@@ -62,7 +66,33 @@ export default function ProfileScreen() {
     finally { setIsExporting(false); }
   };
 
-  const handleLogout = () => { Alert.alert("Logout", "Yakin ingin keluar?", [{ text: "Batal", style: "cancel" }, { text: "Keluar", style: "destructive", onPress: async () => { try { await logout(); Toast.show({ type: "success", text1: "Sampai jumpa" }); } catch {} } }]); };
+  const handleExportDatabase = async () => {
+    setIsExportingDb(true);
+    try {
+      const uri = await exportLocalDatabase();
+      await Sharing.shareAsync(uri, {
+        UTI: "public.database",
+        mimeType: "application/vnd.sqlite3",
+      });
+      Toast.show({
+        type: "success",
+        text1: "Database siap dibuka",
+        text2: "File .db bisa dicek di Navicat atau DB Browser SQLite.",
+      });
+    } catch (e: any) {
+      Toast.show({ type: "error", text1: "Gagal Export DB", text2: e.message });
+    } finally {
+      setIsExportingDb(false);
+    }
+  };
+
+  const confirmLogout = async () => {
+    setIsLogoutDialogVisible(false);
+    try {
+      await logout();
+      Toast.show({ type: "success", text1: "Sampai jumpa" });
+    } catch {}
+  };
 
   return (
     <SafeAreaView style={styles.container} edges={["top"]}>
@@ -141,10 +171,11 @@ export default function ProfileScreen() {
         <View style={styles.actionSection}>
           <Button title="Riwayat Langganan (Inaktif)" onPress={() => router.push("/archived" as any)} variant="secondary" icon={<Ionicons name="time-outline" size={20} color={colors.primary} />} />
           <Button title="Export Daftar ke PDF" onPress={handleExportPDF} variant="secondary" isLoading={isExporting} icon={<Ionicons name="document-text-outline" size={20} color={colors.accent} />} />
+          <Button title="Export Database (.db)" onPress={handleExportDatabase} variant="secondary" isLoading={isExportingDb} icon={<Ionicons name="server-outline" size={20} color={colors.primary} />} />
           <Button title="Ganti Password" onPress={() => setIsPasswordVisible(true)} variant="secondary" icon={<Ionicons name="key-outline" size={20} color={colors.warning} />} />
         </View>
 
-        <Button title="Keluar" onPress={handleLogout} variant="danger" size="lg" isLoading={isLoading} icon={<Ionicons name="log-out-outline" size={22} color={colors.white} />} />
+        <Button title="Keluar" onPress={() => setIsLogoutDialogVisible(true)} variant="danger" size="lg" isLoading={isLoading} icon={<Ionicons name="log-out-outline" size={22} color={colors.white} />} />
         <Text style={styles.version}>Langganinaja v1.0.0</Text>
       </ScrollView>
 
@@ -185,10 +216,21 @@ export default function ProfileScreen() {
       <Modal visible={isBudgetVisible} animationType="fade" transparent>
         <View style={styles.modalOverlay}><View style={styles.modalContent}>
           <View style={styles.modalHeader}><Text style={styles.modalTitle}>Batas Anggaran</Text><Text style={styles.modalSubtitle}>Estimasi total pengeluaran bulanan</Text></View>
-          <View style={styles.inputContainer}><Text style={styles.inputLabel}>Nominal (Rp)</Text><TextInput style={styles.modalInput} value={tempBudget} onChangeText={setTempBudget} placeholder="Rp 0" keyboardType="numeric" placeholderTextColor={colors.textMuted} /><Text style={styles.inputHelp}>Kosongkan jika tidak ingin membatasi</Text></View>
+          <View style={styles.inputContainer}><Text style={styles.inputLabel}>Nominal (Rp)</Text><TextInput style={styles.modalInput} value={tempBudget} onChangeText={(value) => setTempBudget(formatRupiahInput(value))} placeholder="0" keyboardType="numeric" placeholderTextColor={colors.textMuted} /><Text style={styles.inputHelp}>Kosongkan jika tidak ingin membatasi</Text></View>
           <View style={styles.modalActions}><Button title="Batal" onPress={() => setIsBudgetVisible(false)} variant="ghost" style={{ flex: 1 }} /><Button title="Simpan" onPress={handleSetBudget} isLoading={isSavingBudget} style={{ flex: 1 }} /></View>
         </View></View>
       </Modal>
+      <ConfirmDialog
+        visible={isLogoutDialogVisible}
+        title="Keluar"
+        message="Yakin ingin keluar dari akun ini?"
+        icon="log-out-outline"
+        onClose={() => setIsLogoutDialogVisible(false)}
+        actions={[
+          { label: "Batal", variant: "secondary", onPress: () => setIsLogoutDialogVisible(false) },
+          { label: "Keluar", variant: "danger", onPress: confirmLogout },
+        ]}
+      />
     </SafeAreaView>
   );
 }

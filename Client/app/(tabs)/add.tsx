@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from "react";
-import { View, Text, StyleSheet, ScrollView, KeyboardAvoidingView, Platform, TouchableOpacity, Image, Alert } from "react-native";
+import { View, Text, StyleSheet, ScrollView, KeyboardAvoidingView, Platform, TouchableOpacity, Image } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { router } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -11,13 +11,14 @@ import * as ImagePicker from "expo-image-picker";
 
 import Input from "@/components/ui/Input";
 import Button from "@/components/ui/Button";
+import ConfirmDialog from "@/components/ui/ConfirmDialog";
 import { Spacing, FontSize, BorderRadius, ThemeColors } from "@/constants";
 import { subscriptionSchema, SubscriptionInput } from "@/schemas/auth.schema";
 import { useSubscriptionStore } from "@/store/subscriptionStore";
 import { useReceiptStore } from "@/store/receiptStore";
 import { useTheme } from "@/hooks/useTheme";
 import { BillingType, CategoryType } from "@/types";
-import { formatDate } from "@/lib/utils";
+import { formatDate, formatRupiahInput, parseRupiahInput } from "@/lib/utils";
 import { getCategories } from "@/lib/categories";
 
 const PREDEFINED_TEMPLATES = [
@@ -39,8 +40,9 @@ export default function AddSubscriptionScreen() {
   const [showNextDatePicker, setShowNextDatePicker] = useState(false);
   const [tempReceiptUri, setTempReceiptUri] = useState<string | null>(null);
   const [selectedCategory, setSelectedCategory] = useState<CategoryType>("OTHER");
+  const [isReceiptSourceVisible, setIsReceiptSourceVisible] = useState(false);
 
-  const handleAttachReceipt = () => { Alert.alert("Bukti Pembayaran", "Pilih sumber foto:", [{ text: "Batal", style: "cancel" }, { text: "Kamera", onPress: openCamera }, { text: "Dari Galeri", onPress: openGallery }]); };
+  const handleAttachReceipt = () => setIsReceiptSourceVisible(true);
   const openCamera = async () => { const p = await ImagePicker.requestCameraPermissionsAsync(); if (!p.granted) { Toast.show({ type: "error", text1: "Izin Ditolak", text2: "Butuh akses kamera." }); return; } const r = await ImagePicker.launchCameraAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, quality: 0.8 }); if (!r.canceled) setTempReceiptUri(r.assets[0].uri); };
   const openGallery = async () => { const p = await ImagePicker.requestMediaLibraryPermissionsAsync(); if (!p.granted) { Toast.show({ type: "error", text1: "Izin Ditolak", text2: "Butuh akses galeri." }); return; } const r = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, quality: 0.8 }); if (!r.canceled) setTempReceiptUri(r.assets[0].uri); };
 
@@ -85,7 +87,7 @@ export default function AddSubscriptionScreen() {
 
           <View>
             <Controller control={control} name="name" render={({ field: { onChange, onBlur, value } }) => (<Input label="Nama Langganan" icon="pricetag-outline" placeholder="contoh: Netflix, Spotify" onChangeText={onChange} onBlur={onBlur} value={value} error={errors.name?.message} />)} />
-            <Controller control={control} name="price" render={({ field: { onChange, onBlur, value } }) => (<Input label="Harga (IDR)" icon="cash-outline" placeholder="contoh: 54000" keyboardType="numeric" onChangeText={(t) => { const n = parseInt(t.replace(/[^0-9]/g, ""), 10); onChange(isNaN(n) ? undefined : n); }} onBlur={onBlur} value={value ? String(value) : ""} error={errors.price?.message} />)} />
+            <Controller control={control} name="price" render={({ field: { onChange, onBlur, value } }) => (<Input label="Harga (IDR)" icon="cash-outline" placeholder="contoh: 54.000" keyboardType="numeric" onChangeText={(t) => onChange(parseRupiahInput(t))} onBlur={onBlur} value={formatRupiahInput(value)} error={errors.price?.message} />)} />
 
             <View style={styles.fieldContainer}>
               <Text style={styles.label}>Siklus Tagihan</Text>
@@ -154,6 +156,18 @@ export default function AddSubscriptionScreen() {
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
+      <ConfirmDialog
+        visible={isReceiptSourceVisible}
+        title="Bukti Pembayaran"
+        message="Pilih sumber foto bukti pembayaran."
+        icon="camera-outline"
+        onClose={() => setIsReceiptSourceVisible(false)}
+        actions={[
+          { label: "Batal", variant: "secondary", onPress: () => setIsReceiptSourceVisible(false) },
+          { label: "Kamera", onPress: () => { setIsReceiptSourceVisible(false); openCamera(); } },
+          { label: "Galeri", onPress: () => { setIsReceiptSourceVisible(false); openGallery(); } },
+        ]}
+      />
     </SafeAreaView>
   );
 }

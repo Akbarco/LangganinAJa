@@ -1,5 +1,5 @@
 import React, { useMemo } from "react";
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, Modal } from "react-native";
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Modal } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { router, useLocalSearchParams } from "expo-router";
 import { Ionicons, MaterialCommunityIcons, FontAwesome5 } from "@expo/vector-icons";
@@ -7,6 +7,7 @@ import Toast from "react-native-toast-message";
 import { Image } from "react-native";
 
 import Button from "@/components/ui/Button";
+import ConfirmDialog from "@/components/ui/ConfirmDialog";
 import { Spacing, FontSize, BorderRadius, ThemeColors } from "@/constants";
 import { useSubscriptionStore } from "@/store/subscriptionStore";
 import { useReceiptStore } from "@/store/receiptStore";
@@ -23,6 +24,7 @@ export default function DetailScreen() {
   const styles = useMemo(() => createStyles(colors, isDark), [colors, isDark]);
   const [isPaying, setIsPaying] = React.useState(false);
   const [isFullscreen, setIsFullscreen] = React.useState(false);
+  const [activeDialog, setActiveDialog] = React.useState<"pay" | "delete" | "toggle" | null>(null);
 
   const sub = subscriptions.find((s) => s.id === id);
   const receiptUri = sub ? receipts[sub.id] : undefined;
@@ -37,9 +39,9 @@ export default function DetailScreen() {
   const days = daysUntil(sub.nextPaymentDate);
   const getUrgencyLabel = () => { if (days === 0) return "Hari ini"; if (days < 0) return `Terlambat ${Math.abs(days)} hari`; if (days === 1) return "Besok"; return `${days} hari lagi`; };
 
-  const handleMarkPaid = () => { Alert.alert("Konfirmasi", `Tandai ${sub.name} sudah dibayar bulan ini?\nJatuh tempo berikutnya akan digeser otomatis.`, [{ text: "Batal", style: "cancel" }, { text: "Sudah Bayar", onPress: async () => { setIsPaying(true); try { await markAsPaid(sub.id); await fetchPaymentHistory(sub.id); Toast.show({ type: "success", text1: "Berhasil", text2: "Pembayaran tercatat & jadwal digeser" }); } catch (e: any) { Toast.show({ type: "error", text1: "Gagal", text2: e.message }); } finally { setIsPaying(false); } } }]); };
-  const handleDelete = () => { Alert.alert("Hapus Langganan", `Yakin ingin menghapus "${sub.name}"?`, [{ text: "Batal", style: "cancel" }, { text: "Hapus", style: "destructive", onPress: async () => { try { await deleteSubscription(sub.id); await fetchSummary(); Toast.show({ type: "success", text1: "Berhasil", text2: `${sub.name} telah dihapus` }); router.back(); } catch (e: any) { Toast.show({ type: "error", text1: "Gagal", text2: e.message }); } } }]); };
-  const handleToggle = async () => { try { await toggleActive(sub.id, !sub.isActive); await fetchSummary(); Toast.show({ type: "success", text1: sub.isActive ? "Dinonaktifkan" : "Diaktifkan", text2: sub.name }); } catch (e: any) { Toast.show({ type: "error", text1: "Gagal", text2: e.message }); } };
+  const confirmMarkPaid = async () => { setIsPaying(true); try { await markAsPaid(sub.id); await fetchPaymentHistory(sub.id); setActiveDialog(null); Toast.show({ type: "success", text1: "Berhasil", text2: "Pembayaran tercatat & jadwal digeser" }); } catch (e: any) { Toast.show({ type: "error", text1: "Gagal", text2: e.message }); } finally { setIsPaying(false); } };
+  const confirmDelete = async () => { setActiveDialog(null); try { await deleteSubscription(sub.id); await fetchSummary(); Toast.show({ type: "success", text1: "Berhasil", text2: `${sub.name} telah dihapus` }); router.back(); } catch (e: any) { Toast.show({ type: "error", text1: "Gagal", text2: e.message }); } };
+  const confirmToggle = async () => { setActiveDialog(null); try { await toggleActive(sub.id, !sub.isActive); await fetchSummary(); Toast.show({ type: "success", text1: sub.isActive ? "Dinonaktifkan" : "Diaktifkan", text2: sub.name }); } catch (e: any) { Toast.show({ type: "error", text1: "Gagal", text2: e.message }); } };
   const handleEdit = () => { router.push(`/edit/${sub.id}` as any); };
 
   return (
@@ -86,18 +88,55 @@ export default function DetailScreen() {
 
         {receiptUri ? (<View style={styles.receiptSection}><Text style={styles.sectionTitle}>Bukti Pembayaran</Text><TouchableOpacity style={styles.receiptContainer} onPress={() => setIsFullscreen(true)} activeOpacity={0.8}><Image source={{ uri: receiptUri }} style={styles.receiptImage} resizeMode="cover" /><View style={styles.zoomOverlay}><Ionicons name="scan-outline" size={32} color="white" /></View></TouchableOpacity></View>) : null}
 
-        {sub.isActive && (<TouchableOpacity style={styles.payButton} onPress={handleMarkPaid} activeOpacity={0.8} disabled={isPaying}><Ionicons name="checkmark-circle" size={24} color={colors.white} /><Text style={styles.payButtonText}>{isPaying ? "Memproses..." : "Tandai Sudah Bayar"}</Text></TouchableOpacity>)}
+        {sub.isActive && (<TouchableOpacity style={styles.payButton} onPress={() => setActiveDialog("pay")} activeOpacity={0.8} disabled={isPaying}><Ionicons name="checkmark-circle" size={24} color={colors.white} /><Text style={styles.payButtonText}>{isPaying ? "Memproses..." : "Tandai Sudah Bayar"}</Text></TouchableOpacity>)}
 
         {paymentHistory.length > 0 && (<View style={styles.historySection}><Text style={styles.sectionTitle}>Riwayat Pembayaran</Text>{paymentHistory.map((p, i) => (<View key={p.id} style={styles.historyItem}><View style={styles.historyDot}><Ionicons name="checkmark" size={12} color={colors.white} /></View>{i < paymentHistory.length - 1 && <View style={styles.historyLine} />}<View style={styles.historyContent}><Text style={styles.historyDate}>{formatDate(p.paidAt)}</Text><Text style={styles.historyAmount}>{formatCurrency(p.amount, sub.currency)}</Text></View></View>))}</View>)}
 
         <View style={styles.actionSection}>
           <Button title="Edit Langganan" onPress={handleEdit} size="lg" icon={<Ionicons name="create-outline" size={20} color={colors.white} />} />
-          <Button title={sub.isActive ? "Nonaktifkan" : "Aktifkan"} onPress={handleToggle} variant="secondary" size="md" icon={<Ionicons name={sub.isActive ? "pause-circle-outline" : "play-circle-outline"} size={20} color={colors.text} />} />
-          <Button title="Hapus Langganan" onPress={handleDelete} variant="danger" size="md" icon={<Ionicons name="trash-outline" size={20} color={colors.white} />} />
+          <Button title={sub.isActive ? "Nonaktifkan" : "Aktifkan"} onPress={() => setActiveDialog("toggle")} variant="secondary" size="md" icon={<Ionicons name={sub.isActive ? "pause-circle-outline" : "play-circle-outline"} size={20} color={colors.text} />} />
+          <Button title="Hapus Langganan" onPress={() => setActiveDialog("delete")} variant="danger" size="md" icon={<Ionicons name="trash-outline" size={20} color={colors.white} />} />
         </View>
       </ScrollView>
 
       <Modal visible={isFullscreen} transparent animationType="fade"><View style={styles.fullscreenContainer}><TouchableOpacity style={styles.closeFullscreenBtn} onPress={() => setIsFullscreen(false)}><Ionicons name="close" size={32} color="white" /></TouchableOpacity><Image source={{ uri: receiptUri }} style={styles.fullscreenImage} resizeMode="contain" /></View></Modal>
+      <ConfirmDialog
+        visible={activeDialog === "pay"}
+        title="Konfirmasi Pembayaran"
+        message={`Tandai ${sub.name} sudah dibayar bulan ini? Jatuh tempo berikutnya akan digeser otomatis.`}
+        icon="checkmark-circle-outline"
+        onClose={() => setActiveDialog(null)}
+        actions={[
+          { label: "Batal", variant: "secondary", onPress: () => setActiveDialog(null) },
+          { label: "Sudah Bayar", variant: "success", onPress: confirmMarkPaid },
+        ]}
+      />
+      <ConfirmDialog
+        visible={activeDialog === "toggle"}
+        title={sub.isActive ? "Nonaktifkan Langganan" : "Aktifkan Langganan"}
+        message={`Yakin ingin ${sub.isActive ? "menonaktifkan" : "mengaktifkan"} "${sub.name}"?`}
+        icon={sub.isActive ? "pause-circle-outline" : "play-circle-outline"}
+        onClose={() => setActiveDialog(null)}
+        actions={[
+          { label: "Batal", variant: "secondary", onPress: () => setActiveDialog(null) },
+          {
+            label: sub.isActive ? "Nonaktifkan" : "Aktifkan",
+            variant: sub.isActive ? "danger" : "success",
+            onPress: confirmToggle,
+          },
+        ]}
+      />
+      <ConfirmDialog
+        visible={activeDialog === "delete"}
+        title="Hapus Langganan"
+        message={`Yakin ingin menghapus "${sub.name}"? Data pembayaran terkait juga ikut terhapus.`}
+        icon="trash-outline"
+        onClose={() => setActiveDialog(null)}
+        actions={[
+          { label: "Batal", variant: "secondary", onPress: () => setActiveDialog(null) },
+          { label: "Hapus", variant: "danger", onPress: confirmDelete },
+        ]}
+      />
     </SafeAreaView>
   );
 }

@@ -13,6 +13,19 @@ export function formatCurrency(amount: number | null | undefined, currency: stri
   }).format(safeAmount);
 }
 
+export function parseRupiahInput(value: string): number | undefined {
+  const digits = value.replace(/[^0-9]/g, "");
+  if (!digits) return undefined;
+  const amount = Number(digits);
+  return Number.isFinite(amount) ? amount : undefined;
+}
+
+export function formatRupiahInput(amount: number | string | null | undefined): string {
+  const digits = String(amount ?? "").replace(/[^0-9]/g, "");
+  if (!digits) return "";
+  return Number(digits).toLocaleString("id-ID");
+}
+
 /**
  * Format ISO date string to readable format.
  * e.g. "2026-04-01T00:00:00.000Z" → "1 Apr 2026"
