@@ -1,30 +1,33 @@
 <p align="center">
-  <img src="./IMG-20260422-WA0002%281%29.jpg.jpeg" alt="LanggananinAja logo" width="160" />
+  <img src="./images/icon.png" alt="LanggananinAja logo" width="160" />
 </p>
 
 <h1 align="center">LanggananinAja</h1>
 
 <p align="center">
-  A full-stack subscription manager for tracking recurring expenses, payment schedules, budgets, and subscription analytics.
+  A full-stack & offline-first subscription manager for tracking recurring expenses, payment schedules, budgets, and subscription analytics.
 </p>
 
 ## Overview
 
-LanggananinAja helps users manage recurring subscriptions from a mobile-first interface. The app combines an Expo React Native client with an Express and PostgreSQL API, giving users a practical way to record subscriptions, monitor monthly spending, track payment history, and stay ahead of upcoming bills.
+LanggananinAja helps users manage recurring subscriptions from a mobile-first interface. The app features a powerful Expo React Native client with local SQLite database for full offline capabilities, paired with an Express and PostgreSQL API. It gives users a practical way to record subscriptions, monitor monthly spending, track payment history, and stay ahead of upcoming bills without relying on constant internet connection.
 
 ## Features
 
-- Email and password authentication with JWT-based protected API routes.
+- **Local Offline Database**: Built-in SQLite database for offline-first user registration, data persistence, and subscription management without internet.
+- Email and password authentication with JWT-based protected API routes for cloud sync (optional).
 - Subscription CRUD with billing cycle, category, currency, start date, and next payment date.
 - Dashboard summary for active subscriptions, inactive subscriptions, monthly totals, yearly estimates, and monthly budget usage.
 - Search, status filtering, and sorting for subscription lists.
 - Payment logging with automatic next-payment-date updates.
 - Analytics views for category breakdowns, upcoming due dates, expensive subscriptions, and spending trends.
 - Monthly budget configuration with usage warnings.
+- Custom Confirm Dialog UI for consistent, native-feeling alert management.
 - Local receipt attachment support through camera or gallery.
 - Local app lock using a 4-digit PIN.
 - Light and dark theme support.
 - PDF export for active subscription reports.
+- Database export functionality for backup.
 - Local notification reminders before upcoming billing dates.
 
 ## Tech Stack
@@ -36,6 +39,7 @@ LanggananinAja helps users manage recurring subscriptions from a mobile-first in
 - Expo Router
 - TypeScript
 - Zustand
+- Expo SQLite & File System (Local Database)
 - React Hook Form
 - Zod
 - Expo Secure Store
@@ -61,7 +65,7 @@ LanggananinAja/
 |   |-- components/         # Reusable UI and feature components
 |   |-- constants/          # Theme, API URL, and app constants
 |   |-- hooks/              # Shared React hooks
-|   |-- lib/                # API client, utilities, notifications, storage
+|   |-- lib/                # Local SQLite DB, API client, utilities, notifications, storage
 |   |-- schemas/            # Client-side validation schemas
 |   |-- store/              # Zustand stores
 |   `-- types/              # Shared client TypeScript types
@@ -108,44 +112,16 @@ EXPO_PUBLIC_API_URL="http://192.168.1.17:3000/api"
 
 ## Getting Started
 
-### 1. Install Server Dependencies
+### 1. Install Client Dependencies
 
-```bash
-cd Server
-npm install
-```
-
-### 2. Configure the Database
-
-Make sure PostgreSQL is running and `DATABASE_URL` points to a valid database, then apply the Prisma migrations:
-
-```bash
-npx prisma migrate dev
-npx prisma generate
-```
-
-### 3. Start the API
-
-```bash
-npm run dev
-```
-
-The API runs on:
-
-```text
-http://localhost:3000
-```
-
-### 4. Install Client Dependencies
-
-Open a new terminal:
+The client application can run fully locally using `expo-sqlite` and `expo-file-system`.
 
 ```bash
 cd Client
 npm install
 ```
 
-### 5. Start the Mobile App
+### 2. Start the Mobile App
 
 ```bash
 npm run start
@@ -157,6 +133,18 @@ You can also run platform-specific builds:
 npm run android
 npm run ios
 npm run web
+```
+
+### 3. Server Setup (Optional for cloud backend)
+
+To use the Express backend API instead of the local SQLite DB:
+
+```bash
+cd Server
+npm install
+npx prisma migrate dev
+npx prisma generate
+npm run dev
 ```
 
 ## Available Scripts
@@ -231,11 +219,12 @@ Supported categories:
 
 ## Notes
 
-- The server must be running before the client can fetch or mutate data.
-- The client automatically resolves the API URL from `EXPO_PUBLIC_API_URL`; when it is not set, it falls back to local development defaults.
+- The app now operates natively on a **Local SQLite Database** giving an offline-first experience.
+- The server provides REST API capabilities if you wish to sync or use remote data source.
 - Receipt images and app-lock settings are stored locally on the device.
 - Notification reminders are scheduled locally by the mobile app.
 
 ## License
 
 This project is currently licensed under the `ISC` license declared in the server package.
+
