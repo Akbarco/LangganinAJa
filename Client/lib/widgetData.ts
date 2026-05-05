@@ -247,6 +247,21 @@ export async function loadWidgetData(upcomingLimit: number = 3): Promise<WidgetD
     ]);
     return { isLoggedIn: true, summary, upcoming, isDark };
   } catch {
-    return { isLoggedIn: false, summary: null, upcoming: [], isDark };
+    // userId sudah ada → user sudah login, tapi DB error (mis. DB belum ready di
+    // headless widget context). Tetap tampilkan UI logged-in dengan data default,
+    // jangan fallback ke "Login dulu" yang bikin user bingung.
+    return {
+      isLoggedIn: true,
+      summary: {
+        monthlyTotal: 0,
+        yearlyTotal: 0,
+        activeCount: 0,
+        inactiveCount: 0,
+        monthlyBudget: null,
+        currency: "IDR",
+      },
+      upcoming: [],
+      isDark,
+    };
   }
 }
