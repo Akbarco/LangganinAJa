@@ -72,7 +72,15 @@ export default function AnalyticsScreen() {
   const [monthOffset, setMonthOffset] = useState(0);
 
   useEffect(() => {
-    Promise.all([fetchSubscriptions(), fetchSummary()]).catch(() => null);
+    const loadData = async () => {
+      try {
+        await fetchSubscriptions();
+        await fetchSummary();
+      } catch {
+        // ignore
+      }
+    };
+    loadData();
   }, [fetchSubscriptions, fetchSummary]);
 
   const activeSubscriptions = useMemo(

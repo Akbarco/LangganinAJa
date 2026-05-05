@@ -12,10 +12,22 @@
  */
 
 import "expo-router/entry";
-import { registerWidgetTaskHandler } from "react-native-android-widget";
+import Constants from "expo-constants";
+import { Platform } from "react-native";
 
-import { widgetTaskHandler } from "./widget-task-handler";
+const isExpoGo = Constants.appOwnership === "expo";
 
-// Register widget handler — wajib dipanggil di entry point
-// supaya Android system bisa menemukan handler saat widget lifecycle event
-registerWidgetTaskHandler(widgetTaskHandler);
+// Register widget handler only in native builds. Expo Go does not include the
+// react-native-android-widget native module, so importing it there crashes CRUD tests.
+if (Platform.OS === "android" && !isExpoGo) {
+  void Promise.all([
+    import("react-native-android-widget"),
+    import("./widget-task-handler"),
+  ])
+    .then(([widgetModule, handlerModule]) => {
+      widgetModule.registerWidgetTaskHandler(handlerModule.widgetTaskHandler);
+    })
+    .catch((error) => {
+      console.warn("[Widget] Failed to register task handler:", error);
+    });
+}

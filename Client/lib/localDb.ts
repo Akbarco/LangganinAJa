@@ -14,7 +14,7 @@ import {
   User,
 } from "@/types";
 
-type Database = Awaited<ReturnType<typeof SQLite.openDatabaseAsync>>;
+type Database = ReturnType<typeof SQLite.openDatabaseSync>;
 
 type UserRow = {
   id: string;
@@ -51,6 +51,7 @@ type PaymentRow = {
 };
 
 let dbPromise: Promise<Database> | null = null;
+let dbQueue: Promise<void> = Promise.resolve();
 export const DATABASE_NAME = "langganinaja.db";
 
 const nowIso = () => new Date().toISOString();
@@ -105,17 +106,35 @@ const toPayment = (row: PaymentRow): PaymentLog => ({
   subscriptionId: row.subscription_id,
 });
 
-export const getDb = async () => {
-  if (!dbPromise) {
-    dbPromise = SQLite.openDatabaseAsync(DATABASE_NAME);
+const isNativeDbError = (error: unknown) => {
+  const message = error instanceof Error ? error.message : String(error);
+  return /NativeDatabase|NativeStatement|execAsync|finalizeAsync|SQLITE_BUSY|database is locked|database is busy/i.test(message);
+};
+
+const toLocalDbError = (error: unknown) => {
+  if (isNativeDbError(error)) {
+    return new Error("Database lokal lagi sibuk. Coba simpan ulang beberapa detik lagi.");
   }
 
-  const db = await dbPromise;
+  return error instanceof Error ? error : new Error("Terjadi kesalahan database lokal");
+};
 
-  await db.execAsync(`
-    PRAGMA journal_mode = WAL;
-    PRAGMA foreign_keys = ON;
+const sqlValue = (value: string | number | null) => {
+  if (value === null) return "NULL";
+  if (typeof value === "number") return Number.isFinite(value) ? String(value) : "NULL";
+  return `'${value.replace(/'/g, "''")}'`;
+};
 
+const execSql = async (db: Database, sql: string) => {
+  db.execSync(sql);
+};
+
+const initDatabase = async () => {
+  const db = SQLite.openDatabaseSync(DATABASE_NAME);
+
+  db.execSync("PRAGMA journal_mode = WAL;");
+  db.execSync("PRAGMA foreign_keys = ON;");
+  db.execSync(`
     CREATE TABLE IF NOT EXISTS users (
       id TEXT PRIMARY KEY NOT NULL,
       name TEXT NOT NULL,
@@ -151,7 +170,8 @@ export const getDb = async () => {
       subscription_id TEXT NOT NULL,
       FOREIGN KEY (subscription_id) REFERENCES subscriptions(id) ON DELETE CASCADE
     );
-
+  `);
+  db.execSync(`
     CREATE INDEX IF NOT EXISTS idx_subscriptions_user_id ON subscriptions(user_id);
     CREATE INDEX IF NOT EXISTS idx_payment_logs_subscription_id ON payment_logs(subscription_id);
   `);
@@ -159,61 +179,92 @@ export const getDb = async () => {
   return db;
 };
 
+export const getDb = async () => {
+  if (!dbPromise) {
+    dbPromise = initDatabase().catch((error) => {
+      dbPromise = null;
+      throw error;
+    });
+  }
+
+  return dbPromise;
+};
+
+export const withLocalDb = async <T>(
+  operation: (db: Database) => T | Promise<T>,
+): Promise<T> => {
+  const run = async () => operation(await getDb());
+  const queued = dbQueue.then(run, run);
+
+  dbQueue = queued.then(
+    () => undefined,
+    () => undefined,
+  );
+
+  try {
+    return await queued;
+  } catch (error) {
+    throw toLocalDbError(error);
+  }
+};
+
 export const registerLocalUser = async (
   name: string,
   email: string,
   password: string,
 ): Promise<User> => {
-  const db = await getDb();
   const normalizedEmail = normalizeEmail(email);
-  const existing = await db.getFirstAsync<UserRow>(
-    "SELECT * FROM users WHERE email = ?",
-    normalizedEmail,
-  );
-
-  if (existing) {
-    throw new Error("Email sudah terdaftar di perangkat ini");
-  }
-
   const id = makeId("usr");
   const salt = randomSalt();
   const passwordHash = await hashPassword(password, salt);
   const timestamp = nowIso();
 
-  await db.runAsync(
-    `INSERT INTO users (
-      id, name, email, password_hash, password_salt, monthly_budget, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    [
-      id,
-      name.trim(),
+  return withLocalDb(async (db) => {
+    const existing = await db.getFirstSync<UserRow>(
+      "SELECT * FROM users WHERE email = ?",
       normalizedEmail,
-      passwordHash,
-      salt,
-      null,
-      timestamp,
-      timestamp,
-    ],
-  );
+    );
 
-  return {
-    id,
-    name: name.trim(),
-    email: normalizedEmail,
-    monthlyBudget: null,
-    createdAt: timestamp,
-    updatedAt: timestamp,
-  };
+    if (existing) {
+      throw new Error("Email sudah terdaftar di perangkat ini");
+    }
+
+    await execSql(
+      db,
+      `INSERT INTO users (
+        id, name, email, password_hash, password_salt, monthly_budget, created_at, updated_at
+      ) VALUES (
+        ${sqlValue(id)},
+        ${sqlValue(name.trim())},
+        ${sqlValue(normalizedEmail)},
+        ${sqlValue(passwordHash)},
+        ${sqlValue(salt)},
+        NULL,
+        ${sqlValue(timestamp)},
+        ${sqlValue(timestamp)}
+      );`,
+    );
+
+    return {
+      id,
+      name: name.trim(),
+      email: normalizedEmail,
+      monthlyBudget: null,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    };
+  });
 };
 
 export const loginLocalUser = async (
   email: string,
   password: string,
 ): Promise<LoginResponse> => {
-  const db = await getDb();
-  const row = await db.getFirstAsync<UserRow>(
-    "SELECT * FROM users WHERE email = ?",
-    normalizeEmail(email),
+  const row = await withLocalDb((db) =>
+    db.getFirstSync<UserRow>(
+      "SELECT * FROM users WHERE email = ?",
+      normalizeEmail(email),
+    ),
   );
 
   if (!row) {
@@ -236,7 +287,6 @@ export const updateLocalProfile = async (
   name?: string,
   email?: string,
 ) => {
-  const db = await getDb();
   const normalizedName = name?.trim();
   const normalizedEmail = email ? normalizeEmail(email) : undefined;
 
@@ -244,34 +294,36 @@ export const updateLocalProfile = async (
     throw new Error("Nama atau email wajib diisi");
   }
 
-  if (normalizedEmail) {
-    const duplicate = await db.getFirstAsync<UserRow>(
-      "SELECT * FROM users WHERE email = ? AND id != ?",
-      [normalizedEmail, userId],
+  return withLocalDb(async (db) => {
+    if (normalizedEmail) {
+      const duplicate = await db.getFirstSync<UserRow>(
+        "SELECT * FROM users WHERE email = ? AND id != ?",
+        [normalizedEmail, userId],
+      );
+
+      if (duplicate) {
+        throw new Error("Email sudah digunakan akun lain di perangkat ini");
+      }
+    }
+
+    const timestamp = nowIso();
+    await execSql(
+      db,
+      `UPDATE users
+       SET name = COALESCE(${sqlValue(normalizedName || null)}, name),
+           email = COALESCE(${sqlValue(normalizedEmail || null)}, email),
+           updated_at = ${sqlValue(timestamp)}
+       WHERE id = ${sqlValue(userId)};`,
     );
 
-    if (duplicate) {
-      throw new Error("Email sudah digunakan akun lain di perangkat ini");
-    }
-  }
+    const updated = await db.getFirstSync<UserRow>(
+      "SELECT * FROM users WHERE id = ?",
+      userId,
+    );
+    if (!updated) throw new Error("User tidak ditemukan");
 
-  const timestamp = nowIso();
-  await db.runAsync(
-    `UPDATE users
-     SET name = COALESCE(?, name),
-         email = COALESCE(?, email),
-         updated_at = ?
-     WHERE id = ?`,
-    [normalizedName || null, normalizedEmail || null, timestamp, userId],
-  );
-
-  const updated = await db.getFirstAsync<UserRow>(
-    "SELECT * FROM users WHERE id = ?",
-    userId,
-  );
-  if (!updated) throw new Error("User tidak ditemukan");
-
-  return toUser(updated);
+    return toUser(updated);
+  });
 };
 
 export const changeLocalPassword = async (
@@ -279,10 +331,11 @@ export const changeLocalPassword = async (
   currentPassword: string,
   newPassword: string,
 ) => {
-  const db = await getDb();
-  const user = await db.getFirstAsync<UserRow>(
-    "SELECT * FROM users WHERE id = ?",
-    userId,
+  const user = await withLocalDb((db) =>
+    db.getFirstSync<UserRow>(
+      "SELECT * FROM users WHERE id = ?",
+      userId,
+    ),
   );
   if (!user) throw new Error("User tidak ditemukan");
 
@@ -293,72 +346,80 @@ export const changeLocalPassword = async (
 
   const newSalt = randomSalt();
   const newHash = await hashPassword(newPassword, newSalt);
-  await db.runAsync(
-    "UPDATE users SET password_hash = ?, password_salt = ?, updated_at = ? WHERE id = ?",
-    [newHash, newSalt, nowIso(), userId],
+  await withLocalDb((db) =>
+    execSql(
+      db,
+      `UPDATE users
+       SET password_hash = ${sqlValue(newHash)},
+           password_salt = ${sqlValue(newSalt)},
+           updated_at = ${sqlValue(nowIso())}
+       WHERE id = ${sqlValue(userId)};`,
+    ),
   );
 };
 
-export const setLocalBudget = async (userId: string, amount: number | null) => {
-  const db = await getDb();
-  await db.runAsync(
-    "UPDATE users SET monthly_budget = ?, updated_at = ? WHERE id = ?",
-    [amount, nowIso(), userId],
-  );
+export const setLocalBudget = async (userId: string, amount: number | null) =>
+  withLocalDb(async (db) => {
+    await execSql(
+      db,
+      `UPDATE users
+       SET monthly_budget = ${sqlValue(amount)},
+           updated_at = ${sqlValue(nowIso())}
+       WHERE id = ${sqlValue(userId)};`,
+    );
 
-  const updated = await db.getFirstAsync<UserRow>(
-    "SELECT * FROM users WHERE id = ?",
-    userId,
-  );
-  if (!updated) throw new Error("User tidak ditemukan");
+    const updated = await db.getFirstSync<UserRow>(
+      "SELECT * FROM users WHERE id = ?",
+      userId,
+    );
+    if (!updated) throw new Error("User tidak ditemukan");
 
-  return toUser(updated);
-};
+    return toUser(updated);
+  });
 
-export const getLocalSubscriptions = async (userId: string) => {
-  const db = await getDb();
-  const rows = await db.getAllAsync<SubscriptionRow>(
-    "SELECT * FROM subscriptions WHERE user_id = ? ORDER BY created_at DESC",
-    userId,
-  );
-  return rows.map(toSubscription);
-};
+export const getLocalSubscriptions = async (userId: string) =>
+  withLocalDb(async (db) => {
+    const rows = await db.getAllSync<SubscriptionRow>(
+      "SELECT * FROM subscriptions WHERE user_id = ? ORDER BY created_at DESC",
+      userId,
+    );
+    return rows.map(toSubscription);
+  });
 
 export const getLocalSummary = async (
   userId: string,
-): Promise<SubscriptionSummary> => {
-  const db = await getDb();
-  const rows = await db.getAllAsync<SubscriptionRow>(
-    "SELECT * FROM subscriptions WHERE user_id = ?",
-    userId,
-  );
-  const user = await db.getFirstAsync<UserRow>(
-    "SELECT * FROM users WHERE id = ?",
-    userId,
-  );
+): Promise<SubscriptionSummary> =>
+  withLocalDb(async (db) => {
+    const rows = await db.getAllSync<SubscriptionRow>(
+      "SELECT * FROM subscriptions WHERE user_id = ?",
+      userId,
+    );
+    const user = await db.getFirstSync<UserRow>(
+      "SELECT * FROM users WHERE id = ?",
+      userId,
+    );
 
-  const subscriptions = rows.map(toSubscription);
-  const active = subscriptions.filter((item) => item.isActive);
-  const monthlyTotal = active.reduce((total, item) => {
-    return total + (item.billingCycle === "MONTHLY" ? item.price : Math.round(item.price / 12));
-  }, 0);
+    const subscriptions = rows.map(toSubscription);
+    const active = subscriptions.filter((item) => item.isActive);
+    const monthlyTotal = active.reduce((total, item) => {
+      return total + (item.billingCycle === "MONTHLY" ? item.price : Math.round(item.price / 12));
+    }, 0);
 
-  return {
-    totalSubscriptions: subscriptions.length,
-    activeCount: active.length,
-    inactiveCount: subscriptions.length - active.length,
-    monthlyTotal,
-    yearlyTotal: monthlyTotal * 12,
-    currency: "IDR",
-    monthlyBudget: user?.monthly_budget ?? null,
-  };
-};
+    return {
+      totalSubscriptions: subscriptions.length,
+      activeCount: active.length,
+      inactiveCount: subscriptions.length - active.length,
+      monthlyTotal,
+      yearlyTotal: monthlyTotal * 12,
+      currency: "IDR",
+      monthlyBudget: user?.monthly_budget ?? null,
+    };
+  });
 
 export const createLocalSubscription = async (
   userId: string,
   payload: CreateSubscriptionPayload,
 ) => {
-  const db = await getDb();
   const id = makeId("sub");
   const timestamp = nowIso();
   const subscription: Subscription = {
@@ -376,25 +437,27 @@ export const createLocalSubscription = async (
     updatedAt: timestamp,
   };
 
-  await db.runAsync(
-    `INSERT INTO subscriptions (
-      id, name, price, billing_cycle, category, start_date, next_payment_date,
-      is_active, currency, user_id, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [
-      subscription.id,
-      subscription.name,
-      subscription.price,
-      subscription.billingCycle,
-      subscription.category,
-      subscription.startDate,
-      subscription.nextPaymentDate,
-      subscription.isActive ? 1 : 0,
-      subscription.currency,
-      subscription.userId,
-      subscription.createdAt,
-      subscription.updatedAt,
-    ],
+  await withLocalDb((db) =>
+    execSql(
+      db,
+      `INSERT INTO subscriptions (
+        id, name, price, billing_cycle, category, start_date, next_payment_date,
+        is_active, currency, user_id, created_at, updated_at
+      ) VALUES (
+        ${sqlValue(subscription.id)},
+        ${sqlValue(subscription.name)},
+        ${sqlValue(subscription.price)},
+        ${sqlValue(subscription.billingCycle)},
+        ${sqlValue(subscription.category)},
+        ${sqlValue(subscription.startDate)},
+        ${sqlValue(subscription.nextPaymentDate)},
+        ${sqlValue(subscription.isActive ? 1 : 0)},
+        ${sqlValue(subscription.currency)},
+        ${sqlValue(subscription.userId)},
+        ${sqlValue(subscription.createdAt)},
+        ${sqlValue(subscription.updatedAt)}
+      );`,
+    ),
   );
 
   return subscription;
@@ -404,128 +467,134 @@ export const updateLocalSubscription = async (
   userId: string,
   id: string,
   payload: UpdateSubscriptionPayload,
-) => {
-  const db = await getDb();
-  const existing = await db.getFirstAsync<SubscriptionRow>(
-    "SELECT * FROM subscriptions WHERE id = ? AND user_id = ?",
-    [id, userId],
+) =>
+  withLocalDb(async (db) => {
+    const existing = await db.getFirstSync<SubscriptionRow>(
+      "SELECT * FROM subscriptions WHERE id = ? AND user_id = ?",
+      [id, userId],
+    );
+
+    if (!existing) throw new Error("Langganan tidak ditemukan");
+
+    const current = toSubscription(existing);
+    const updated: Subscription = {
+      ...current,
+      ...payload,
+      name: payload.name !== undefined ? payload.name.trim() : current.name,
+      price: payload.price !== undefined ? Math.round(Number(payload.price)) : current.price,
+      currency:
+        payload.currency !== undefined
+          ? payload.currency.trim().toUpperCase() || "IDR"
+          : current.currency,
+      updatedAt: nowIso(),
+    };
+
+    await execSql(
+      db,
+      `UPDATE subscriptions
+       SET name = ${sqlValue(updated.name)},
+           price = ${sqlValue(updated.price)},
+           billing_cycle = ${sqlValue(updated.billingCycle)},
+           category = ${sqlValue(updated.category)},
+           start_date = ${sqlValue(updated.startDate)},
+           next_payment_date = ${sqlValue(updated.nextPaymentDate)},
+           is_active = ${sqlValue(updated.isActive ? 1 : 0)},
+           currency = ${sqlValue(updated.currency)},
+           updated_at = ${sqlValue(updated.updatedAt)}
+       WHERE id = ${sqlValue(id)} AND user_id = ${sqlValue(userId)};`,
+    );
+
+    return updated;
+  });
+
+export const deleteLocalSubscription = async (userId: string, id: string) =>
+  withLocalDb((db) =>
+    execSql(
+      db,
+      `DELETE FROM subscriptions
+       WHERE id = ${sqlValue(id)} AND user_id = ${sqlValue(userId)};`,
+    ),
   );
-
-  if (!existing) throw new Error("Langganan tidak ditemukan");
-
-  const current = toSubscription(existing);
-  const updated: Subscription = {
-    ...current,
-    ...payload,
-    name: payload.name !== undefined ? payload.name.trim() : current.name,
-    price: payload.price !== undefined ? Math.round(Number(payload.price)) : current.price,
-    currency:
-      payload.currency !== undefined
-        ? payload.currency.trim().toUpperCase() || "IDR"
-        : current.currency,
-    updatedAt: nowIso(),
-  };
-
-  await db.runAsync(
-    `UPDATE subscriptions
-     SET name = ?, price = ?, billing_cycle = ?, category = ?, start_date = ?,
-         next_payment_date = ?, is_active = ?, currency = ?, updated_at = ?
-     WHERE id = ? AND user_id = ?`,
-    [
-      updated.name,
-      updated.price,
-      updated.billingCycle,
-      updated.category,
-      updated.startDate,
-      updated.nextPaymentDate,
-      updated.isActive ? 1 : 0,
-      updated.currency,
-      updated.updatedAt,
-      id,
-      userId,
-    ],
-  );
-
-  return updated;
-};
-
-export const deleteLocalSubscription = async (userId: string, id: string) => {
-  const db = await getDb();
-  await db.runAsync(
-    "DELETE FROM subscriptions WHERE id = ? AND user_id = ?",
-    [id, userId],
-  );
-};
 
 export const markLocalSubscriptionAsPaid = async (
   userId: string,
   id: string,
   note?: string,
-) => {
-  const db = await getDb();
-  const row = await db.getFirstAsync<SubscriptionRow>(
-    "SELECT * FROM subscriptions WHERE id = ? AND user_id = ?",
-    [id, userId],
-  );
-  if (!row) throw new Error("Langganan tidak ditemukan");
+) =>
+  withLocalDb(async (db) => {
+    const row = await db.getFirstSync<SubscriptionRow>(
+      "SELECT * FROM subscriptions WHERE id = ? AND user_id = ?",
+      [id, userId],
+    );
+    if (!row) throw new Error("Langganan tidak ditemukan");
 
-  const subscription = toSubscription(row);
-  const payment: PaymentLog = {
-    id: makeId("pay"),
-    amount: subscription.price,
-    paidAt: nowIso(),
-    note: note || null,
-    subscriptionId: subscription.id,
-  };
-  const nextDate = new Date(subscription.nextPaymentDate);
+    const subscription = toSubscription(row);
+    const payment: PaymentLog = {
+      id: makeId("pay"),
+      amount: subscription.price,
+      paidAt: nowIso(),
+      note: note || null,
+      subscriptionId: subscription.id,
+    };
+    const nextDate = new Date(subscription.nextPaymentDate);
 
-  if (subscription.billingCycle === "MONTHLY") {
-    nextDate.setMonth(nextDate.getMonth() + 1);
-  } else {
-    nextDate.setFullYear(nextDate.getFullYear() + 1);
-  }
+    if (subscription.billingCycle === "MONTHLY") {
+      nextDate.setMonth(nextDate.getMonth() + 1);
+    } else {
+      nextDate.setFullYear(nextDate.getFullYear() + 1);
+    }
 
-  const updatedAt = nowIso();
-  await db.runAsync(
-    "INSERT INTO payment_logs (id, amount, paid_at, note, subscription_id) VALUES (?, ?, ?, ?, ?)",
-    [payment.id, payment.amount, payment.paidAt, payment.note, payment.subscriptionId],
-  );
-  await db.runAsync(
-    "UPDATE subscriptions SET next_payment_date = ?, updated_at = ? WHERE id = ? AND user_id = ?",
-    [nextDate.toISOString(), updatedAt, id, userId],
-  );
+    const updatedAt = nowIso();
+    await execSql(
+      db,
+      `INSERT INTO payment_logs (id, amount, paid_at, note, subscription_id)
+       VALUES (
+         ${sqlValue(payment.id)},
+         ${sqlValue(payment.amount)},
+         ${sqlValue(payment.paidAt)},
+         ${sqlValue(payment.note)},
+         ${sqlValue(payment.subscriptionId)}
+       );`,
+    );
+    await execSql(
+      db,
+      `UPDATE subscriptions
+       SET next_payment_date = ${sqlValue(nextDate.toISOString())},
+           updated_at = ${sqlValue(updatedAt)}
+       WHERE id = ${sqlValue(id)} AND user_id = ${sqlValue(userId)};`,
+    );
 
-  return payment;
-};
+    return payment;
+  });
 
 export const getLocalPaymentHistory = async (
   userId: string,
   subscriptionId: string,
-) => {
-  const db = await getDb();
-  const subscription = await db.getFirstAsync<SubscriptionRow>(
-    "SELECT * FROM subscriptions WHERE id = ? AND user_id = ?",
-    [subscriptionId, userId],
-  );
-  if (!subscription) return [];
+) =>
+  withLocalDb(async (db) => {
+    const subscription = await db.getFirstSync<SubscriptionRow>(
+      "SELECT * FROM subscriptions WHERE id = ? AND user_id = ?",
+      [subscriptionId, userId],
+    );
+    if (!subscription) return [];
 
-  const rows = await db.getAllAsync<PaymentRow>(
-    "SELECT * FROM payment_logs WHERE subscription_id = ? ORDER BY paid_at DESC",
-    subscriptionId,
-  );
+    const rows = await db.getAllSync<PaymentRow>(
+      "SELECT * FROM payment_logs WHERE subscription_id = ? ORDER BY paid_at DESC",
+      subscriptionId,
+    );
 
-  return rows.map(toPayment);
-};
+    return rows.map(toPayment);
+  });
 
-export const exportLocalDatabase = async () => {
-  const db = await getDb();
-  await db.execAsync("PRAGMA wal_checkpoint(TRUNCATE);");
+export const exportLocalDatabase = async () =>
+  withLocalDb(async (db) => {
+    db.execSync("PRAGMA wal_checkpoint(TRUNCATE);");
 
-  const bytes = await db.serializeAsync();
-  const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-  const file = new File(Paths.cache, `Langganinaja-${timestamp}.db`);
-  file.create({ overwrite: true, intermediates: true });
-  file.write(bytes);
+    const bytes = db.serializeSync();
+    const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const file = new File(Paths.cache, `Langganinaja-${timestamp}.db`);
+    file.create({ overwrite: true, intermediates: true });
+    file.write(bytes);
 
-  return file.uri;
-};
+    return file.uri;
+  });

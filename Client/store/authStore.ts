@@ -9,7 +9,7 @@ import {
   setLocalBudget,
   updateLocalProfile,
 } from "@/lib/localDb";
-import { syncAllWidgets } from "@/lib/widgetSync";
+import { scheduleWidgetSync } from "@/lib/widgetSync";
 
 interface AuthState {
   user: User | null;
@@ -75,7 +75,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       await storage.setItem("user", JSON.stringify(user));
 
       set({ user, token, isLoading: false });
-      syncAllWidgets(); // Widget update: "Login dulu" → data real
+      scheduleWidgetSync(); // Widget update: "Login dulu" → data real
     } catch (error: any) {
       set({ isLoading: false });
       throw error;
@@ -99,7 +99,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     await storage.deleteItem("appPin");
     await storage.deleteItem("isAppLockEnabled");
     set({ user: null, token: null, appPin: null, isAppLockEnabled: false });
-    syncAllWidgets(); // Widget update: data → "Login dulu"
+    scheduleWidgetSync(); // Widget update: data → "Login dulu"
   },
 
   setAppPin: async (pin: string | null) => {
@@ -136,6 +136,6 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     const updated = await setLocalBudget(user.id, amount);
     await storage.setItem("user", JSON.stringify(updated));
     set({ user: updated });
-    syncAllWidgets(); // Widget update: budget progress bar
+    scheduleWidgetSync(); // Widget update: budget progress bar
   },
 }));

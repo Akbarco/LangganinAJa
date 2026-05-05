@@ -16,7 +16,7 @@
 import React from "react";
 import type { WidgetTaskHandlerProps } from "react-native-android-widget";
 
-import { loadWidgetData } from "@/lib/widgetData";
+import { getSystemIsDark, loadWidgetData, WidgetData } from "@/lib/widgetData";
 
 import { LargeWidget } from "./widgets/LargeWidget";
 import { MediumWidget } from "./widgets/MediumWidget";
@@ -40,6 +40,13 @@ const UPCOMING_LIMIT: Record<WidgetName, number> = {
   LargeDashboard: 3,
 };
 
+const getFallbackWidgetData = (): WidgetData => ({
+  isLoggedIn: false,
+  summary: null,
+  upcoming: [],
+  isDark: getSystemIsDark(),
+});
+
 // ─── Task handler ─────────────────────────────────────────────────────────────
 
 export async function widgetTaskHandler(props: WidgetTaskHandlerProps) {
@@ -56,31 +63,32 @@ export async function widgetTaskHandler(props: WidgetTaskHandlerProps) {
   const limit = UPCOMING_LIMIT[widgetName];
   const { width, height } = widgetInfo;
 
+  const renderCurrentWidget = async () => {
+    try {
+      const data = await loadWidgetData(limit);
+      renderWidget(<Widget {...data} width={width} height={height} />);
+    } catch (error) {
+      console.warn("[WidgetTaskHandler] Render fallback:", error);
+      renderWidget(<Widget {...getFallbackWidgetData()} width={width} height={height} />);
+    }
+  };
+
   switch (widgetAction) {
     // ── Widget ditambahkan ke home screen ──────────────────────────────────
     case "WIDGET_ADDED": {
-      const data = await loadWidgetData(limit);
-      renderWidget(
-        <Widget {...data} width={width} height={height} />,
-      );
+      await renderCurrentWidget();
       break;
     }
 
     // ── Scheduled update (tiap 30 menit) atau manual update ───────────────
     case "WIDGET_UPDATE": {
-      const data = await loadWidgetData(limit);
-      renderWidget(
-        <Widget {...data} width={width} height={height} />,
-      );
+      await renderCurrentWidget();
       break;
     }
 
     // ── User resize widget → re-render dengan dimensi baru ────────────────
     case "WIDGET_RESIZED": {
-      const data = await loadWidgetData(limit);
-      renderWidget(
-        <Widget {...data} width={width} height={height} />,
-      );
+      await renderCurrentWidget();
       break;
     }
 
@@ -90,10 +98,7 @@ export async function widgetTaskHandler(props: WidgetTaskHandlerProps) {
     // custom WIDGET_CLICK yang butuh refresh data setelah aksi.
     case "WIDGET_CLICK": {
       // Refresh data setelah click (biar data selalu fresh saat user balik)
-      const data = await loadWidgetData(limit);
-      renderWidget(
-        <Widget {...data} width={width} height={height} />,
-      );
+      await renderCurrentWidget();
       break;
     }
 

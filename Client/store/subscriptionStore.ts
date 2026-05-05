@@ -16,7 +16,7 @@ import {
   updateLocalSubscription,
 } from "@/lib/localDb";
 import { scheduleSubscriptionReminders, cancelSubscriptionReminders } from "@/lib/notifications";
-import { syncAllWidgets } from "@/lib/widgetSync";
+import { scheduleWidgetSync } from "@/lib/widgetSync";
 import { useAuthStore } from "@/store/authStore";
 
 interface SubscriptionState {
@@ -100,7 +100,7 @@ export const useSubscriptionStore = create<SubscriptionState>((set, get) => ({
     }
 
     await get().fetchSummary();
-    syncAllWidgets(); // Real-time widget update
+    scheduleWidgetSync(); // Real-time widget update
     return subscription;
   },
 
@@ -129,7 +129,7 @@ export const useSubscriptionStore = create<SubscriptionState>((set, get) => ({
     }
 
     await get().fetchSummary();
-    syncAllWidgets(); // Real-time widget update
+    scheduleWidgetSync(); // Real-time widget update
   },
 
   deleteSubscription: async (id: string) => {
@@ -148,7 +148,7 @@ export const useSubscriptionStore = create<SubscriptionState>((set, get) => ({
       console.log("Gagal membatalkan notifikasi", e);
     }
     await get().fetchSummary();
-    syncAllWidgets(); // Real-time widget update
+    scheduleWidgetSync(); // Real-time widget update
   },
 
   toggleActive: async (id: string, isActive: boolean) => {
@@ -163,7 +163,7 @@ export const useSubscriptionStore = create<SubscriptionState>((set, get) => ({
     // Refresh subscription list to get updated nextPaymentDate
     await get().fetchSubscriptions();
     await get().fetchSummary();
-    syncAllWidgets(); // Real-time widget update
+    scheduleWidgetSync(); // Real-time widget update
   },
 
   fetchPaymentHistory: async (id: string) => {
@@ -184,7 +184,8 @@ export const useSubscriptionStore = create<SubscriptionState>((set, get) => ({
   refresh: async () => {
     set({ isRefreshing: true });
     try {
-      await Promise.all([get().fetchSubscriptions(), get().fetchSummary()]);
+      await get().fetchSubscriptions();
+      await get().fetchSummary();
     } finally {
       set({ isRefreshing: false });
     }

@@ -3,8 +3,8 @@
  *
  * Script untuk generate adaptive-icon.png baru yang sesuai spesifikasi Android:
  *   - Canvas: 1024 × 1024 px (representasi 108dp)
- *   - Safe zone: 61% dari canvas (~624px) = logo tidak terpotong oleh mask Android
- *   - Logo di-scale-down dan di-center, sisa ruang = transparent padding
+ *   - Icon di-scale-down dan di-center dalam background putih
+ *   - Tidak ada padding transparan, supaya launcher tidak menampilkan warna biru
  *
  * Usage: node scripts/generate-adaptive-icon.js
  * Requires: sharp (sudah ada di devDependencies)
@@ -14,47 +14,48 @@ const sharp = require("sharp");
 const path = require("path");
 
 const CANVAS = 1024;
-// Safe zone Android = 66dp dari 108dp total = 61.1% → kita pakai 60% supaya ada
-// sedikit margin ekstra yang aman dari semua jenis mask (circle, squircle, dst)
-const SAFE_ZONE_RATIO = 0.60;
-const LOGO_SIZE = Math.round(CANVAS * SAFE_ZONE_RATIO); // 614px
-const OFFSET = Math.round((CANVAS - LOGO_SIZE) / 2);    // 205px di tiap sisi
+// Input icon.png sudah punya rounded white card + logo di dalamnya.
+// 84% menjaga bentuk tetap besar seperti launcher icon biasa, tapi aman dari
+// mask Android yang bisa circle/squircle.
+const SAFE_ZONE_RATIO = 0.84;
+const LOGO_SIZE = Math.round(CANVAS * SAFE_ZONE_RATIO);
+const OFFSET = Math.round((CANVAS - LOGO_SIZE) / 2);
 
 const INPUT  = path.join(__dirname, "../assets/images/icon.png");
 const OUTPUT = path.join(__dirname, "../assets/images/adaptive-icon.png");
 
 async function run() {
-  console.log(`📐 Canvas       : ${CANVAS}×${CANVAS} px`);
-  console.log(`🎯 Logo size    : ${LOGO_SIZE}×${LOGO_SIZE} px (${(SAFE_ZONE_RATIO * 100).toFixed(0)}%)`);
-  console.log(`📏 Padding      : ${OFFSET}px per sisi`);
-  console.log(`📂 Input        : ${INPUT}`);
-  console.log(`📂 Output       : ${OUTPUT}`);
+  console.log(`Canvas       : ${CANVAS}x${CANVAS} px`);
+  console.log(`Logo size    : ${LOGO_SIZE}x${LOGO_SIZE} px (${(SAFE_ZONE_RATIO * 100).toFixed(0)}%)`);
+  console.log(`Padding      : ${OFFSET}px per side`);
+  console.log(`Input        : ${INPUT}`);
+  console.log(`Output       : ${OUTPUT}`);
   console.log("");
 
-  // Resize logo ke LOGO_SIZE, pertahankan aspect ratio, background transparent
+  // Resize icon ke LOGO_SIZE, pertahankan aspect ratio.
   const resizedLogo = await sharp(INPUT)
-    .resize(LOGO_SIZE, LOGO_SIZE, { fit: "contain", background: { r: 0, g: 0, b: 0, alpha: 0 } })
+    .resize(LOGO_SIZE, LOGO_SIZE, { fit: "contain", background: { r: 255, g: 255, b: 255, alpha: 1 } })
     .png()
     .toBuffer();
 
-  // Composite logo ke atas canvas 1024×1024 transparan
+  // Composite ke atas canvas putih supaya tidak ada edge biru di adaptive icon.
   await sharp({
     create: {
       width: CANVAS,
       height: CANVAS,
       channels: 4,
-      background: { r: 0, g: 0, b: 0, alpha: 0 },
+      background: { r: 255, g: 255, b: 255, alpha: 1 },
     },
   })
     .composite([{ input: resizedLogo, top: OFFSET, left: OFFSET }])
     .png({ compressionLevel: 9 })
     .toFile(OUTPUT);
 
-  console.log(`✅ adaptive-icon.png berhasil di-generate!`);
+  console.log(`adaptive-icon.png berhasil di-generate.`);
   console.log(`   Rebuild app untuk menerapkan icon baru.`);
 }
 
 run().catch((err) => {
-  console.error("❌ Gagal generate adaptive icon:", err);
+  console.error("Gagal generate adaptive icon:", err);
   process.exit(1);
 });

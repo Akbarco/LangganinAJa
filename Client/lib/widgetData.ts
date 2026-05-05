@@ -8,10 +8,9 @@
  */
 
 import * as SecureStore from "expo-secure-store";
-import * as SQLite from "expo-sqlite";
 import { Appearance } from "react-native";
 
-import { DATABASE_NAME } from "./localDb";
+import { withLocalDb } from "./localDb";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -161,31 +160,31 @@ type SubRow = {
  * Query summary data for the widget directly from SQLite.
  */
 export async function getWidgetSummary(userId: string): Promise<WidgetSummary> {
-  const db = await SQLite.openDatabaseAsync(DATABASE_NAME);
+  return withLocalDb(async (db) => {
+    const userRow = await db.getFirstAsync<UserRow>(
+      "SELECT monthly_budget FROM users WHERE id = ?",
+      userId,
+    );
 
-  const userRow = await db.getFirstAsync<UserRow>(
-    "SELECT monthly_budget FROM users WHERE id = ?",
-    userId,
-  );
+    const subs = await db.getAllAsync<SubRow>(
+      "SELECT price, billing_cycle, is_active, currency FROM subscriptions WHERE user_id = ?",
+      userId,
+    );
 
-  const subs = await db.getAllAsync<SubRow>(
-    "SELECT price, billing_cycle, is_active, currency FROM subscriptions WHERE user_id = ?",
-    userId,
-  );
+    const active = subs.filter((s) => s.is_active === 1);
+    const monthlyTotal = active.reduce((sum, s) => {
+      return sum + (s.billing_cycle === "MONTHLY" ? s.price : Math.round(s.price / 12));
+    }, 0);
 
-  const active = subs.filter((s) => s.is_active === 1);
-  const monthlyTotal = active.reduce((sum, s) => {
-    return sum + (s.billing_cycle === "MONTHLY" ? s.price : Math.round(s.price / 12));
-  }, 0);
-
-  return {
-    monthlyTotal,
-    yearlyTotal: monthlyTotal * 12,
-    activeCount: active.length,
-    inactiveCount: subs.length - active.length,
-    monthlyBudget: userRow?.monthly_budget ?? null,
-    currency: "IDR",
-  };
+    return {
+      monthlyTotal,
+      yearlyTotal: monthlyTotal * 12,
+      activeCount: active.length,
+      inactiveCount: subs.length - active.length,
+      monthlyBudget: userRow?.monthly_budget ?? null,
+      currency: "IDR",
+    };
+  });
 }
 
 // ─── Data: upcoming payments ─────────────────────────────────────────────────
@@ -205,25 +204,25 @@ export async function getUpcomingPayments(
   userId: string,
   limit: number = 3,
 ): Promise<UpcomingPayment[]> {
-  const db = await SQLite.openDatabaseAsync(DATABASE_NAME);
+  return withLocalDb(async (db) => {
+    const rows = await db.getAllAsync<UpcomingRow>(
+      `SELECT id, name, price, currency, next_payment_date
+       FROM subscriptions
+       WHERE user_id = ? AND is_active = 1
+       ORDER BY next_payment_date ASC
+       LIMIT ?`,
+      [userId, limit],
+    );
 
-  const rows = await db.getAllAsync<UpcomingRow>(
-    `SELECT id, name, price, currency, next_payment_date
-     FROM subscriptions
-     WHERE user_id = ? AND is_active = 1
-     ORDER BY next_payment_date ASC
-     LIMIT ?`,
-    [userId, limit],
-  );
-
-  return rows.map((r) => ({
-    id: r.id,
-    name: r.name,
-    price: r.price,
-    currency: r.currency,
-    nextPaymentDate: r.next_payment_date,
-    daysUntil: calcDaysUntil(r.next_payment_date),
-  }));
+    return rows.map((r) => ({
+      id: r.id,
+      name: r.name,
+      price: r.price,
+      currency: r.currency,
+      nextPaymentDate: r.next_payment_date,
+      daysUntil: calcDaysUntil(r.next_payment_date),
+    }));
+  });
 }
 
 // ─── Composite: load all widget data ─────────────────────────────────────────
@@ -241,10 +240,8 @@ export async function loadWidgetData(upcomingLimit: number = 3): Promise<WidgetD
   }
 
   try {
-    const [summary, upcoming] = await Promise.all([
-      getWidgetSummary(userId),
-      getUpcomingPayments(userId, upcomingLimit),
-    ]);
+    const summary = await getWidgetSummary(userId);
+    const upcoming = await getUpcomingPayments(userId, upcomingLimit);
     return { isLoggedIn: true, summary, upcoming, isDark };
   } catch {
     // userId sudah ada → user sudah login, tapi DB error (mis. DB belum ready di
