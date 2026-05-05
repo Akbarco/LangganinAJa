@@ -173,6 +173,7 @@ export default function ProfileScreen() {
           <Button title="Export Daftar ke PDF" onPress={handleExportPDF} variant="secondary" isLoading={isExporting} icon={<Ionicons name="document-text-outline" size={20} color={colors.accent} />} />
           <Button title="Export Database (.db)" onPress={handleExportDatabase} variant="secondary" isLoading={isExportingDb} icon={<Ionicons name="server-outline" size={20} color={colors.primary} />} />
           <Button title="Ganti Password" onPress={() => setIsPasswordVisible(true)} variant="secondary" icon={<Ionicons name="key-outline" size={20} color={colors.warning} />} />
+          <Button title="Widget Preview" onPress={() => router.push("/widget-preview" as any)} variant="secondary" icon={<Ionicons name="grid-outline" size={20} color={colors.primary} />} />
         </View>
 
         <Button title="Keluar" onPress={() => setIsLogoutDialogVisible(true)} variant="danger" size="lg" isLoading={isLoading} icon={<Ionicons name="log-out-outline" size={22} color={colors.white} />} />
