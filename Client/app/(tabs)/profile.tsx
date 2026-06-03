@@ -44,10 +44,10 @@ export default function ProfileScreen() {
   const [isSavingBudget, setIsSavingBudget] = React.useState(false);
 
   const openEditProfile = () => { setEditName(user?.name || ""); setEditEmail(user?.email || ""); setIsEditProfileVisible(true); };
-  const handleUpdateProfile = async () => { if (!editName.trim() || !editEmail.trim()) { Toast.show({ type: "error", text1: "Nama dan Email wajib diisi" }); return; } setIsSavingProfile(true); try { await updateProfile(editName, editEmail); setIsEditProfileVisible(false); Toast.show({ type: "success", text1: "Profil berhasil diperbarui" }); } catch (e: any) { Toast.show({ type: "error", text1: "Gagal", text2: e.message }); } finally { setIsSavingProfile(false); } };
+  const handleUpdateProfile = async () => { if (!editName.trim() || !editEmail.trim()) { Toast.show({ type: "error", text1: "Nama dan Email wajib diisi" }); return; } setIsSavingProfile(true); try { await updateProfile(editName, editEmail); setIsEditProfileVisible(false); } catch (e: any) { Toast.show({ type: "error", text1: "Gagal", text2: e.message }); } finally { setIsSavingProfile(false); } };
   const handleUpdatePassword = async () => { if (!oldPassword || newPassword.length < 6) { Toast.show({ type: "error", text1: "Password lama wajib diisi", text2: "Password baru minimal 6 karakter" }); return; } setIsSavingPassword(true); try { await changePassword(oldPassword, newPassword); setIsPasswordVisible(false); setOldPassword(""); setNewPassword(""); Toast.show({ type: "success", text1: "Password berhasil diganti" }); } catch (e: any) { Toast.show({ type: "error", text1: "Gagal", text2: e.message }); } finally { setIsSavingPassword(false); } };
   const openBudgetModal = () => { setTempBudget(formatRupiahInput(user?.monthlyBudget)); setIsBudgetVisible(true); };
-  const handleSetBudget = async () => { setIsSavingBudget(true); try { await setBudget(parseRupiahInput(tempBudget) ?? null); setIsBudgetVisible(false); Toast.show({ type: "success", text1: "Batas pengeluaran diperbarui" }); } catch (e: any) { Toast.show({ type: "error", text1: "Gagal", text2: e.message }); } finally { setIsSavingBudget(false); } };
+  const handleSetBudget = async () => { setIsSavingBudget(true); try { await setBudget(parseRupiahInput(tempBudget) ?? null); setIsBudgetVisible(false); } catch (e: any) { Toast.show({ type: "error", text1: "Gagal", text2: e.message }); } finally { setIsSavingBudget(false); } };
   const handleToggleLock = async (value: boolean) => { if (value) { setTempPin(""); setPinError(""); setShowPinModal(true); } else { await toggleAppLock(false); await setAppPin(null); Toast.show({ type: "success", text1: "Kunci Aplikasi Dinonaktifkan" }); } };
   const handleSavePin = async () => { if (tempPin.length !== 4) { setPinError("PIN harus 4 digit angka"); return; } await setAppPin(tempPin); await toggleAppLock(true); setShowPinModal(false); Toast.show({ type: "success", text1: "Berhasil", text2: "Kunci Aplikasi Diaktifkan" }); };
 
@@ -184,7 +184,7 @@ export default function ProfileScreen() {
       <Modal visible={showPinModal} animationType="fade" transparent>
         <View style={styles.modalOverlay}><View style={styles.modalContent}>
           <Text style={styles.modalTitle}>Buat PIN Keamanan</Text><Text style={styles.modalSubtitle}>Masukkan 4 digit PIN rahasia untuk mengunci aplikasi ini.</Text>
-          <TextInput style={styles.pinInput} keyboardType="numeric" secureTextEntry maxLength={4} value={tempPin} onChangeText={(v) => { setTempPin(v.replace(/[^0-9]/g, "")); setPinError(""); }} placeholder="****" placeholderTextColor={colors.textMuted} autoFocus />
+          <TextInput style={styles.pinInput} keyboardType="numeric" secureTextEntry maxLength={4} value={tempPin} onChangeText={(v) => { setTempPin(v.replace(/[^0-9]/g, "")); setPinError(""); }} placeholder="****" placeholderTextColor={colors.textMuted} />
           {pinError ? <Text style={styles.errorText}>{pinError}</Text> : null}
           <View style={styles.modalActions}>
             <TouchableOpacity style={styles.modalBtnCancel} onPress={() => setShowPinModal(false)}><Text style={styles.modalBtnCancelText}>Batal</Text></TouchableOpacity>

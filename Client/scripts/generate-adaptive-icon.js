@@ -15,9 +15,9 @@ const path = require("path");
 
 const CANVAS = 1024;
 // Input icon.png sudah punya rounded white card + logo di dalamnya.
-// 84% menjaga bentuk tetap besar seperti launcher icon biasa, tapi aman dari
-// mask Android yang bisa circle/squircle.
-const SAFE_ZONE_RATIO = 0.84;
+// Android adaptive icon akan dimask oleh launcher (circle/squircle), jadi
+// foreground harus lebih kecil dari icon biasa supaya tidak kepotong di atas/samping.
+const SAFE_ZONE_RATIO = 0.66;
 const LOGO_SIZE = Math.round(CANVAS * SAFE_ZONE_RATIO);
 const OFFSET = Math.round((CANVAS - LOGO_SIZE) / 2);
 

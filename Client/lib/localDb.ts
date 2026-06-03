@@ -5,11 +5,15 @@ import * as SQLite from "expo-sqlite";
 import {
   BillingType,
   CategoryType,
+  CreateSubscriptionAccountPayload,
   CreateSubscriptionPayload,
   LoginResponse,
   PaymentLog,
   Subscription,
+  SubscriptionAccount,
+  SubscriptionAccountStatus,
   SubscriptionSummary,
+  UpdateSubscriptionAccountPayload,
   UpdateSubscriptionPayload,
   User,
 } from "@/types";
@@ -37,7 +41,20 @@ type SubscriptionRow = {
   next_payment_date: string;
   is_active: number;
   currency: string;
+  account_limit: number | null;
   user_id: string;
+  created_at: string;
+  updated_at: string;
+};
+
+type SubscriptionAccountRow = {
+  id: string;
+  subscription_id: string;
+  name: string;
+  email: string | null;
+  holder_name: string | null;
+  status: SubscriptionAccountStatus;
+  notes: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -60,6 +77,15 @@ const makeId = (prefix: string) =>
   `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
 
 const normalizeEmail = (email: string) => email.trim().toLowerCase();
+
+const normalizeGmail = (email?: string | null) => {
+  const normalized = normalizeEmail(email || "");
+  if (!normalized) throw new Error("Email Gmail wajib diisi");
+  if (!/^[^\s@]+@gmail\.com$/.test(normalized)) {
+    throw new Error("Email akun harus menggunakan @gmail.com");
+  }
+  return normalized;
+};
 
 const randomSalt = () =>
   Array.from({ length: 16 }, () =>
@@ -93,10 +119,37 @@ const toSubscription = (row: SubscriptionRow): Subscription => ({
   nextPaymentDate: row.next_payment_date,
   isActive: row.is_active === 1,
   currency: row.currency,
+  accountLimit: row.account_limit,
   userId: row.user_id,
   createdAt: row.created_at,
   updatedAt: row.updated_at,
 });
+
+const toSubscriptionAccount = (row: SubscriptionAccountRow): SubscriptionAccount => ({
+  id: row.id,
+  subscriptionId: row.subscription_id,
+  name: row.name,
+  email: row.email,
+  holderName: row.holder_name,
+  status: row.status,
+  notes: row.notes,
+  createdAt: row.created_at,
+  updatedAt: row.updated_at,
+});
+
+const getAccountMultiplier = (activeAccountCount?: number | null) =>
+  activeAccountCount && activeAccountCount > 0 ? activeAccountCount : 1;
+
+const getMonthlySubscriptionCost = (
+  subscription: Pick<Subscription, "price" | "billingCycle">,
+  activeAccountCount?: number | null,
+) => {
+  const baseMonthly =
+    subscription.billingCycle === "MONTHLY"
+      ? subscription.price
+      : Math.round(subscription.price / 12);
+  return baseMonthly * getAccountMultiplier(activeAccountCount);
+};
 
 const toPayment = (row: PaymentRow): PaymentLog => ({
   id: row.id,
@@ -156,10 +209,24 @@ const initDatabase = async () => {
       next_payment_date TEXT NOT NULL,
       is_active INTEGER NOT NULL DEFAULT 1,
       currency TEXT NOT NULL DEFAULT 'IDR',
+      account_limit INTEGER,
       user_id TEXT NOT NULL,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS subscription_accounts (
+      id TEXT PRIMARY KEY NOT NULL,
+      subscription_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      email TEXT,
+      holder_name TEXT,
+      status TEXT NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE', 'INACTIVE')),
+      notes TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY (subscription_id) REFERENCES subscriptions(id) ON DELETE CASCADE
     );
 
     CREATE TABLE IF NOT EXISTS payment_logs (
@@ -171,8 +238,14 @@ const initDatabase = async () => {
       FOREIGN KEY (subscription_id) REFERENCES subscriptions(id) ON DELETE CASCADE
     );
   `);
+  const subscriptionColumns = db.getAllSync<{ name: string }>("PRAGMA table_info(subscriptions)");
+  if (!subscriptionColumns.some((column) => column.name === "account_limit")) {
+    db.execSync("ALTER TABLE subscriptions ADD COLUMN account_limit INTEGER;");
+  }
+
   db.execSync(`
     CREATE INDEX IF NOT EXISTS idx_subscriptions_user_id ON subscriptions(user_id);
+    CREATE INDEX IF NOT EXISTS idx_subscription_accounts_subscription_id ON subscription_accounts(subscription_id);
     CREATE INDEX IF NOT EXISTS idx_payment_logs_subscription_id ON payment_logs(subscription_id);
   `);
 
@@ -398,11 +471,30 @@ export const getLocalSummary = async (
       "SELECT * FROM users WHERE id = ?",
       userId,
     );
+    const accountCounts = await db.getAllSync<{
+      subscription_id: string;
+      active_count: number;
+    }>(
+      `SELECT subscription_id, COUNT(*) as active_count
+       FROM subscription_accounts
+       WHERE status = 'ACTIVE'
+       GROUP BY subscription_id`,
+    );
+    const activeAccountsBySubscriptionId = accountCounts.reduce<Record<string, number>>(
+      (acc, row) => {
+        acc[row.subscription_id] = row.active_count;
+        return acc;
+      },
+      {},
+    );
 
     const subscriptions = rows.map(toSubscription);
     const active = subscriptions.filter((item) => item.isActive);
     const monthlyTotal = active.reduce((total, item) => {
-      return total + (item.billingCycle === "MONTHLY" ? item.price : Math.round(item.price / 12));
+      return (
+        total +
+        getMonthlySubscriptionCost(item, activeAccountsBySubscriptionId[item.id])
+      );
     }, 0);
 
     return {
@@ -432,6 +524,7 @@ export const createLocalSubscription = async (
     nextPaymentDate: payload.nextPaymentDate,
     isActive: true,
     currency: payload.currency?.trim().toUpperCase() || "IDR",
+    accountLimit: payload.accountLimit ?? null,
     userId,
     createdAt: timestamp,
     updatedAt: timestamp,
@@ -442,7 +535,7 @@ export const createLocalSubscription = async (
       db,
       `INSERT INTO subscriptions (
         id, name, price, billing_cycle, category, start_date, next_payment_date,
-        is_active, currency, user_id, created_at, updated_at
+        is_active, currency, account_limit, user_id, created_at, updated_at
       ) VALUES (
         ${sqlValue(subscription.id)},
         ${sqlValue(subscription.name)},
@@ -453,6 +546,7 @@ export const createLocalSubscription = async (
         ${sqlValue(subscription.nextPaymentDate)},
         ${sqlValue(subscription.isActive ? 1 : 0)},
         ${sqlValue(subscription.currency)},
+        ${sqlValue(subscription.accountLimit)},
         ${sqlValue(subscription.userId)},
         ${sqlValue(subscription.createdAt)},
         ${sqlValue(subscription.updatedAt)}
@@ -486,6 +580,8 @@ export const updateLocalSubscription = async (
         payload.currency !== undefined
           ? payload.currency.trim().toUpperCase() || "IDR"
           : current.currency,
+      accountLimit:
+        payload.accountLimit !== undefined ? payload.accountLimit : current.accountLimit,
       updatedAt: nowIso(),
     };
 
@@ -500,6 +596,7 @@ export const updateLocalSubscription = async (
            next_payment_date = ${sqlValue(updated.nextPaymentDate)},
            is_active = ${sqlValue(updated.isActive ? 1 : 0)},
            currency = ${sqlValue(updated.currency)},
+           account_limit = ${sqlValue(updated.accountLimit)},
            updated_at = ${sqlValue(updated.updatedAt)}
        WHERE id = ${sqlValue(id)} AND user_id = ${sqlValue(userId)};`,
     );
@@ -516,6 +613,161 @@ export const deleteLocalSubscription = async (userId: string, id: string) =>
     ),
   );
 
+export const getLocalSubscriptionAccounts = async (
+  userId: string,
+  subscriptionId: string,
+) =>
+  withLocalDb(async (db) => {
+    const subscription = await db.getFirstSync<SubscriptionRow>(
+      "SELECT * FROM subscriptions WHERE id = ? AND user_id = ?",
+      [subscriptionId, userId],
+    );
+    if (!subscription) return [];
+
+    const rows = await db.getAllSync<SubscriptionAccountRow>(
+      `SELECT * FROM subscription_accounts
+       WHERE subscription_id = ?
+       ORDER BY status ASC, created_at ASC`,
+      subscriptionId,
+    );
+
+    return rows.map(toSubscriptionAccount);
+  });
+
+export const createLocalSubscriptionAccount = async (
+  userId: string,
+  subscriptionId: string,
+  payload: CreateSubscriptionAccountPayload,
+) =>
+  withLocalDb(async (db) => {
+    const subscription = await db.getFirstSync<SubscriptionRow>(
+      "SELECT * FROM subscriptions WHERE id = ? AND user_id = ?",
+      [subscriptionId, userId],
+    );
+    if (!subscription) throw new Error("Langganan tidak ditemukan");
+
+    if (subscription.account_limit) {
+      const accountCount = await db.getFirstSync<{ total: number }>(
+        "SELECT COUNT(*) as total FROM subscription_accounts WHERE subscription_id = ?",
+        subscriptionId,
+      );
+      if ((accountCount?.total ?? 0) >= subscription.account_limit) {
+        throw new Error(
+          `Slot akun penuh (${subscription.account_limit}/${subscription.account_limit})`,
+        );
+      }
+    }
+
+    const name = payload.name.trim();
+    if (!name) throw new Error("Nama akun wajib diisi");
+    const email = normalizeGmail(payload.email);
+
+    const timestamp = nowIso();
+    const account: SubscriptionAccount = {
+      id: makeId("acc"),
+      subscriptionId,
+      name,
+      email,
+      holderName: payload.holderName?.trim() || null,
+      status: "ACTIVE",
+      notes: payload.notes?.trim() || null,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    };
+
+    await execSql(
+      db,
+      `INSERT INTO subscription_accounts (
+        id, subscription_id, name, email, holder_name, status, notes, created_at, updated_at
+      ) VALUES (
+        ${sqlValue(account.id)},
+        ${sqlValue(account.subscriptionId)},
+        ${sqlValue(account.name)},
+        ${sqlValue(account.email)},
+        ${sqlValue(account.holderName)},
+        ${sqlValue(account.status)},
+        ${sqlValue(account.notes)},
+        ${sqlValue(account.createdAt)},
+        ${sqlValue(account.updatedAt)}
+      );`,
+    );
+
+    return account;
+  });
+
+export const updateLocalSubscriptionAccount = async (
+  userId: string,
+  subscriptionId: string,
+  accountId: string,
+  payload: UpdateSubscriptionAccountPayload,
+) =>
+  withLocalDb(async (db) => {
+    const existing = await db.getFirstSync<SubscriptionAccountRow>(
+      `SELECT sa.*
+       FROM subscription_accounts sa
+       INNER JOIN subscriptions s ON s.id = sa.subscription_id
+       WHERE sa.id = ? AND sa.subscription_id = ? AND s.user_id = ?`,
+      [accountId, subscriptionId, userId],
+    );
+    if (!existing) throw new Error("Akun langganan tidak ditemukan");
+
+    const current = toSubscriptionAccount(existing);
+    const nextName = payload.name !== undefined ? payload.name.trim() : current.name;
+    if (!nextName) throw new Error("Nama akun wajib diisi");
+    const nextEmail =
+      payload.email !== undefined ? normalizeGmail(payload.email) : current.email;
+
+    const updated: SubscriptionAccount = {
+      ...current,
+      name: nextName,
+      email: nextEmail,
+      holderName:
+        payload.holderName !== undefined
+          ? payload.holderName?.trim() || null
+          : current.holderName,
+      status: payload.status ?? current.status,
+      notes:
+        payload.notes !== undefined ? payload.notes?.trim() || null : current.notes,
+      updatedAt: nowIso(),
+    };
+
+    await execSql(
+      db,
+      `UPDATE subscription_accounts
+       SET name = ${sqlValue(updated.name)},
+           email = ${sqlValue(updated.email)},
+           holder_name = ${sqlValue(updated.holderName)},
+           status = ${sqlValue(updated.status)},
+           notes = ${sqlValue(updated.notes)},
+           updated_at = ${sqlValue(updated.updatedAt)}
+       WHERE id = ${sqlValue(accountId)} AND subscription_id = ${sqlValue(subscriptionId)};`,
+    );
+
+    return updated;
+  });
+
+export const deleteLocalSubscriptionAccount = async (
+  userId: string,
+  subscriptionId: string,
+  accountId: string,
+) =>
+  withLocalDb(async (db) => {
+    const existing = await db.getFirstSync<{ id: string }>(
+      `SELECT sa.id
+       FROM subscription_accounts sa
+       INNER JOIN subscriptions s ON s.id = sa.subscription_id
+       WHERE sa.id = ? AND sa.subscription_id = ? AND s.user_id = ?`,
+      [accountId, subscriptionId, userId],
+    );
+    if (!existing) throw new Error("Akun langganan tidak ditemukan");
+
+    await execSql(
+      db,
+      `DELETE FROM subscription_accounts
+       WHERE id = ${sqlValue(accountId)} AND subscription_id = ${sqlValue(subscriptionId)};`,
+    );
+  });
+
 export const markLocalSubscriptionAsPaid = async (
   userId: string,
   id: string,
@@ -529,9 +781,15 @@ export const markLocalSubscriptionAsPaid = async (
     if (!row) throw new Error("Langganan tidak ditemukan");
 
     const subscription = toSubscription(row);
+    const accountCount = await db.getFirstSync<{ active_count: number }>(
+      `SELECT COUNT(*) as active_count
+       FROM subscription_accounts
+       WHERE subscription_id = ? AND status = 'ACTIVE'`,
+      id,
+    );
     const payment: PaymentLog = {
       id: makeId("pay"),
-      amount: subscription.price,
+      amount: subscription.price * getAccountMultiplier(accountCount?.active_count),
       paidAt: nowIso(),
       note: note || null,
       subscriptionId: subscription.id,

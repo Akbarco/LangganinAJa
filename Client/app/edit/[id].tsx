@@ -43,10 +43,10 @@ export default function EditSubscriptionScreen() {
   const subscription = subscriptions.find((s) => s.id === id);
   const { control, handleSubmit, reset, setValue, watch, formState: { errors } } = useForm<SubscriptionInput>({
     resolver: zodResolver(subscriptionSchema as any),
-    defaultValues: { name: "", price: undefined as any, billingCycle: "MONTHLY", startDate: new Date().toISOString(), nextPaymentDate: new Date().toISOString(), currency: "IDR" },
+    defaultValues: { name: "", price: undefined as any, billingCycle: "MONTHLY", startDate: new Date().toISOString(), nextPaymentDate: new Date().toISOString(), currency: "IDR", accountLimit: null },
   });
 
-  useEffect(() => { if (subscription) { reset({ name: subscription.name, price: subscription.price, billingCycle: subscription.billingCycle, startDate: subscription.startDate, nextPaymentDate: subscription.nextPaymentDate, currency: subscription.currency }); setTempReceiptUri(receipts[subscription.id] || null); setSelectedCategory(subscription.category || "OTHER"); } }, [subscription]);
+  useEffect(() => { if (subscription) { reset({ name: subscription.name, price: subscription.price, billingCycle: subscription.billingCycle, startDate: subscription.startDate, nextPaymentDate: subscription.nextPaymentDate, currency: subscription.currency, accountLimit: subscription.accountLimit ?? null }); setTempReceiptUri(receipts[subscription.id] || null); setSelectedCategory(subscription.category || "OTHER"); } }, [subscription]);
 
   const billingCycle = watch("billingCycle");
   const startDate = watch("startDate");
@@ -56,10 +56,9 @@ export default function EditSubscriptionScreen() {
     if (!id) return;
     setIsSubmitting(true);
     try {
-      await updateSubscription(id, { name: data.name, price: Number(data.price), billingCycle: data.billingCycle, category: selectedCategory, startDate: data.startDate, nextPaymentDate: data.nextPaymentDate, currency: data.currency });
+      await updateSubscription(id, { name: data.name, price: Number(data.price), billingCycle: data.billingCycle, category: selectedCategory, startDate: data.startDate, nextPaymentDate: data.nextPaymentDate, currency: data.currency, accountLimit: data.accountLimit ?? null });
       if (tempReceiptUri) { if (receipts[id] !== tempReceiptUri) await setReceipt(id, tempReceiptUri); } else { if (receipts[id]) await removeReceipt(id); }
       await fetchSummary();
-      Toast.show({ type: "success", text1: "Berhasil", text2: `${data.name} telah diperbarui` });
       router.back();
     } catch (e: any) { Toast.show({ type: "error", text1: "Gagal memperbarui", text2: e.message }); }
     finally { setIsSubmitting(false); }
@@ -79,6 +78,7 @@ export default function EditSubscriptionScreen() {
           <View>
             <Controller control={control} name="name" render={({ field: { onChange, onBlur, value } }) => (<Input label="Nama Langganan" icon="pricetag-outline" placeholder="contoh: Netflix, Spotify" onChangeText={onChange} onBlur={onBlur} value={value} error={errors.name?.message} />)} />
             <Controller control={control} name="price" render={({ field: { onChange, onBlur, value } }) => (<Input label="Harga (IDR)" icon="cash-outline" placeholder="contoh: 54.000" keyboardType="numeric" onChangeText={(t) => onChange(parseRupiahInput(t))} onBlur={onBlur} value={formatRupiahInput(value)} error={errors.price?.message} />)} />
+            <Controller control={control} name="accountLimit" render={({ field: { onChange, onBlur, value } }) => (<Input label="Jumlah Akun/Slot (Opsional)" icon="people-outline" placeholder="contoh: 3" keyboardType="numeric" onChangeText={(t) => { const clean = t.replace(/[^0-9]/g, ""); onChange(clean ? Number(clean) : null); }} onBlur={onBlur} value={value ? String(value) : ""} error={errors.accountLimit?.message} />)} />
 
             <View style={styles.fieldContainer}><Text style={styles.label}>Siklus Tagihan</Text><View style={styles.cycleRow}>{(["MONTHLY", "YEARLY"] as BillingType[]).map((c) => (<TouchableOpacity key={c} style={[styles.cycleOption, billingCycle === c && styles.cycleOptionActive]} onPress={() => setValue("billingCycle", c)} activeOpacity={0.7}><Ionicons name={c === "MONTHLY" ? "calendar-outline" : "calendar-number-outline"} size={20} color={billingCycle === c ? colors.white : colors.textMuted} /><Text style={[styles.cycleText, billingCycle === c && styles.cycleTextActive]}>{c === "MONTHLY" ? "Bulanan" : "Tahunan"}</Text></TouchableOpacity>))}</View>{errors.billingCycle && <Text style={styles.error}>{errors.billingCycle.message}</Text>}</View>
 

@@ -35,15 +35,34 @@ model Subscription {
   nextPaymentDate DateTime
   isActive        Boolean     @default(true)
   currency        String      @default("IDR")
+  accountLimit    Int?
 
   userId String
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
+  accounts  SubscriptionAccount[]
   payments  PaymentLog[]
+  createdAt DateTime              @default(now())
+  updatedAt DateTime              @updatedAt
+
+  @@index([userId])
+}
+
+model SubscriptionAccount {
+  id         String                @id @default(uuid())
+  name       String
+  email      String?
+  holderName String?
+  status     SubscriptionAccountStatus @default(ACTIVE)
+  notes      String?
+
+  subscriptionId String
+  subscription   Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  @@index([userId])
+  @@index([subscriptionId])
 }
 
 model PaymentLog {
@@ -70,4 +89,9 @@ enum Category {
   EDUCATION
   GAMING
   OTHER
+}
+
+enum SubscriptionAccountStatus {
+  ACTIVE
+  INACTIVE
 }

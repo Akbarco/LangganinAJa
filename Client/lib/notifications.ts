@@ -2,6 +2,13 @@ import * as Notifications from "expo-notifications";
 import { Platform } from "react-native";
 import { formatCurrency } from "./utils";
 
+const REMINDER_CHANNEL_ID = "langganinaja-reminders";
+const REMINDER_DAYS = [7, 3, 1, 0] as const;
+const REMINDER_TIMES = [
+  { hour: 9, minute: 0 },
+  { hour: 19, minute: 0 },
+] as const;
+
 // Handler global: Izinkan notikasi tetap muncul meski aplikasi sedang terbuka (foreground)
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -13,11 +20,25 @@ Notifications.setNotificationHandler({
   }),
 });
 
+async function ensureReminderChannel() {
+  if (Platform.OS !== "android") return;
+
+  await Notifications.setNotificationChannelAsync(REMINDER_CHANNEL_ID, {
+    name: "Pengingat Langganan",
+    importance: Notifications.AndroidImportance.MAX,
+    vibrationPattern: [0, 250, 250, 250],
+    lightColor: "#2563EB",
+    sound: "default",
+  });
+}
+
 /**
  * Meminta izin dari perangkat untuk menampilkan notifikasi layar.
  */
 export async function requestNotificationPermissions() {
   if (Platform.OS === "web") return false;
+
+  await ensureReminderChannel();
 
   const { status: existingStatus } = await Notifications.getPermissionsAsync();
   let finalStatus = existingStatus;
@@ -27,21 +48,39 @@ export async function requestNotificationPermissions() {
     finalStatus = status;
   }
 
-  // Khusus Android, butuh membuat konfigurasi "Channel"
-  if (Platform.OS === "android") {
-    await Notifications.setNotificationChannelAsync("langgananinaja-reminders", {
-      name: "Pengingat Langganan",
-      importance: Notifications.AndroidImportance.MAX,
-      vibrationPattern: [0, 250, 250, 250],
-      lightColor: "#6C5CE7",
-    });
-  }
-
   return finalStatus === "granted";
 }
 
+function getReminderCopy(subscription: {
+  name: string;
+  price: number;
+  currency: string;
+}, daysBefore: (typeof REMINDER_DAYS)[number]) {
+  const priceText = formatCurrency(subscription.price, subscription.currency);
+
+  if (daysBefore === 0) {
+    return {
+      title: `Tagihan ${subscription.name} jatuh tempo hari ini`,
+      body: `Tagihan ${subscription.name} sebesar ${priceText} jatuh tempo hari ini. Jangan lupa dicek ya.`,
+    };
+  }
+
+  if (daysBefore === 1) {
+    return {
+      title: `Tagihan ${subscription.name} besok`,
+      body: `Tagihan ${subscription.name} sebesar ${priceText} akan jatuh tempo besok.`,
+    };
+  }
+
+  return {
+    title: `Tagihan ${subscription.name} H-${daysBefore}`,
+    body: `${subscription.name} sebesar ${priceText} akan jatuh tempo ${daysBefore} hari lagi.`,
+  };
+}
+
 /**
- * Menjadwalkan alarm notifikasi H-7 dan H-1.
+ * Menjadwalkan alarm notifikasi H-7, H-3, H-1, dan hari H.
+ * Setiap hari pengingat muncul dua kali: pagi dan malam.
  */
 export async function scheduleSubscriptionReminders(subscription: {
   id: string;
@@ -50,6 +89,9 @@ export async function scheduleSubscriptionReminders(subscription: {
   currency: string;
   nextPaymentDate: string;
 }) {
+  const hasPermission = await requestNotificationPermissions();
+  if (!hasPermission) return;
+
   const nextDate = new Date(subscription.nextPaymentDate);
   const now = new Date();
 
@@ -61,59 +103,32 @@ export async function scheduleSubscriptionReminders(subscription: {
     }
   }
 
-  // 2. Buat jadwal baru untuk H-7 dan H-1
-  const daysToNotif = [7, 1];
+  // 2. Buat jadwal baru untuk H-7, H-3, H-1, dan hari H. Masing-masing 2x.
+  for (const daysBefore of REMINDER_DAYS) {
+    for (const time of REMINDER_TIMES) {
+      const triggerDate = new Date(nextDate);
+      triggerDate.setDate(triggerDate.getDate() - daysBefore);
+      triggerDate.setHours(time.hour, time.minute, 0, 0);
 
-  for (const daysBefore of daysToNotif) {
-    const triggerDate = new Date(nextDate);
-    triggerDate.setDate(triggerDate.getDate() - daysBefore);
+      if (triggerDate <= now) continue;
 
-    // Cek apakah hari peringatan jatuh pada hari ini
-    const isToday =
-      triggerDate.getDate() === now.getDate() &&
-      triggerDate.getMonth() === now.getMonth() &&
-      triggerDate.getFullYear() === now.getFullYear();
-
-    if (isToday) {
-      // Jika jadwal notifikasi seharusnya berbunyi hari ini,
-      // jadwalkan untuk 10 detik dari sekarang agar bisa langsung dites/dilihat.
-      triggerDate.setTime(now.getTime() + 10 * 1000);
-    } else {
-      // Untuk hari-hari lainnya di masa depan, atur alarm bunyi jam 09:00 Pagi
-      triggerDate.setHours(9, 0, 0, 0);
-    }
-
-    // Kalau waktu trigger-nya masih di masa depan, mari setel notifikasinya!
-    if (triggerDate > now) {
-      let title = "";
-      let body = "";
-
-      if (daysBefore === 7) {
-        title = `Tagihan ${subscription.name} Segera Tiba`;
-        body = `Hai! Sekadar mengingatkan, tagihan ${subscription.name} sebesar ${formatCurrency(
-          subscription.price,
-          subscription.currency
-        )} akan jatuh tempo 7 hari lagi. Pastikan saldo Anda mencukupi ya.`;
-      }
-
-      if (daysBefore === 1) {
-        title = `Peringatan: Tagihan ${subscription.name} Besok`;
-        body = `Tagihan langganan ${subscription.name} Anda senilai ${formatCurrency(
-          subscription.price,
-          subscription.currency
-        )} akan jatuh tempo esok hari. Mohon siapkan dana untuk menghindari kelambatan.`;
-      }
+      const { title, body } = getReminderCopy(subscription, daysBefore);
 
       await Notifications.scheduleNotificationAsync({
         content: {
           title,
           body,
-          data: { subId: subscription.id },
+          data: {
+            subId: subscription.id,
+            daysBefore,
+            reminderTime: `${time.hour}:${time.minute.toString().padStart(2, "0")}`,
+          },
           sound: true,
         },
         trigger: {
           type: Notifications.SchedulableTriggerInputTypes.DATE,
           date: triggerDate,
+          channelId: REMINDER_CHANNEL_ID,
         },
       });
     }

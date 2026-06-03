@@ -93,6 +93,84 @@ const parseSubscriptionPayload = (payload, { partial = false } = {}) => {
     data.isActive = Boolean(payload.isActive);
   }
 
+  if (payload.accountLimit !== undefined) {
+    if (payload.accountLimit === null || payload.accountLimit === "") {
+      data.accountLimit = null;
+    } else {
+      const accountLimit = Number(payload.accountLimit);
+      if (!Number.isInteger(accountLimit) || accountLimit <= 0) {
+        throw new AppError("Account limit must be a positive integer", 400);
+      }
+      data.accountLimit = accountLimit;
+    }
+  }
+
+  return data;
+};
+
+const ensureSubscriptionOwner = async (subscriptionId, userId) => {
+  const subscription = await prisma.subscription.findUnique({
+    where: { id: subscriptionId },
+  });
+
+  if (!subscription) throw new AppError("Subscription not found", 404);
+  if (subscription.userId !== userId) throw new AppError("Unauthorized", 403);
+
+  return subscription;
+};
+
+const getAccountMultiplier = (subscription) => {
+  const activeAccountCount =
+    subscription.accounts?.filter((account) => account.status === "ACTIVE")
+      .length ?? 0;
+  return activeAccountCount > 0 ? activeAccountCount : 1;
+};
+
+const getMonthlySubscriptionCost = (subscription) => {
+  const baseMonthly =
+    subscription.billingCycle === "MONTHLY"
+      ? subscription.price
+      : Math.round(subscription.price / 12);
+  return baseMonthly * getAccountMultiplier(subscription);
+};
+
+const normalizeGmail = (value) => {
+  const email = typeof value === "string" ? value.trim().toLowerCase() : "";
+  if (!email) throw new AppError("Account Gmail email is required", 400);
+  if (!/^[^\s@]+@gmail\.com$/.test(email)) {
+    throw new AppError("Account email must use @gmail.com", 400);
+  }
+  return email;
+};
+
+const parseAccountPayload = (payload, { partial = false } = {}) => {
+  const data = {};
+
+  if (!partial || payload.name !== undefined) {
+    const name = payload.name?.trim();
+    if (!name) throw new AppError("Account name is required", 400);
+    data.name = name;
+  }
+
+  if (!partial || payload.email !== undefined) {
+    data.email = normalizeGmail(payload.email);
+  }
+
+  if (payload.holderName !== undefined) {
+    data.holderName = payload.holderName?.trim() || null;
+  }
+
+  if (payload.notes !== undefined) {
+    data.notes = payload.notes?.trim() || null;
+  }
+
+  if (payload.status !== undefined) {
+    if (!["ACTIVE", "INACTIVE"].includes(payload.status)) {
+      throw new AppError("Account status is invalid", 400);
+    }
+    data.status = payload.status;
+  }
+
   return data;
 };
 
@@ -126,6 +204,113 @@ export const getSubscriptions = async (req, res, next) => {
     });
 
     return successResponse(res, "Subscriptions fetched", subscriptions);
+  } catch (error) {
+    next(error);
+  }
+};
+
+// GET /api/subscriptions/:id/accounts
+export const getSubscriptionAccounts = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user.id;
+
+    await ensureSubscriptionOwner(id, userId);
+
+    const accounts = await prisma.subscriptionAccount.findMany({
+      where: { subscriptionId: id },
+      orderBy: [{ status: "asc" }, { createdAt: "asc" }],
+    });
+
+    return successResponse(res, "Subscription accounts fetched", accounts);
+  } catch (error) {
+    next(error);
+  }
+};
+
+// POST /api/subscriptions/:id/accounts
+export const createSubscriptionAccount = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user.id;
+
+    const subscription = await ensureSubscriptionOwner(id, userId);
+    if (subscription.accountLimit) {
+      const accountCount = await prisma.subscriptionAccount.count({
+        where: { subscriptionId: id },
+      });
+      if (accountCount >= subscription.accountLimit) {
+        throw new AppError(
+          `Account slot is full (${subscription.accountLimit}/${subscription.accountLimit})`,
+          400
+        );
+      }
+    }
+    const accountData = parseAccountPayload(req.body);
+
+    const account = await prisma.subscriptionAccount.create({
+      data: {
+        ...accountData,
+        subscriptionId: id,
+      },
+    });
+
+    return successResponse(res, "Subscription account created", account, 201);
+  } catch (error) {
+    next(error);
+  }
+};
+
+// PUT /api/subscriptions/:id/accounts/:accountId
+export const updateSubscriptionAccount = async (req, res, next) => {
+  try {
+    const { id, accountId } = req.params;
+    const userId = req.user.id;
+
+    await ensureSubscriptionOwner(id, userId);
+    const accountData = parseAccountPayload(req.body, { partial: true });
+    if (Object.keys(accountData).length === 0) {
+      throw new AppError("No valid fields to update", 400);
+    }
+
+    const existing = await prisma.subscriptionAccount.findUnique({
+      where: { id: accountId },
+    });
+
+    if (!existing || existing.subscriptionId !== id) {
+      throw new AppError("Subscription account not found", 404);
+    }
+
+    const account = await prisma.subscriptionAccount.update({
+      where: { id: accountId },
+      data: accountData,
+    });
+
+    return successResponse(res, "Subscription account updated", account);
+  } catch (error) {
+    next(error);
+  }
+};
+
+// DELETE /api/subscriptions/:id/accounts/:accountId
+export const deleteSubscriptionAccount = async (req, res, next) => {
+  try {
+    const { id, accountId } = req.params;
+    const userId = req.user.id;
+
+    await ensureSubscriptionOwner(id, userId);
+
+    const existing = await prisma.subscriptionAccount.findUnique({
+      where: { id: accountId },
+    });
+
+    if (!existing || existing.subscriptionId !== id) {
+      throw new AppError("Subscription account not found", 404);
+    }
+
+    await prisma.subscriptionAccount.delete({ where: { id: accountId } });
+
+    return successResponse(res, "Subscription account deleted", null);
   } catch (error) {
     next(error);
   }
@@ -185,16 +370,16 @@ export const getSummary = async (req, res, next) => {
 
     const allSubscriptions = await prisma.subscription.findMany({
       where: { userId },
+      include: { accounts: true },
     });
 
     const activeSubscriptions = allSubscriptions.filter(s => s.isActive);
     const inactiveSubscriptions = allSubscriptions.filter(s => !s.isActive);
 
-    const monthlyTotal = activeSubscriptions.reduce((acc, sub) => {
-      if (sub.billingCycle === "MONTHLY") return acc + sub.price;
-      if (sub.billingCycle === "YEARLY") return acc + Math.round(sub.price / 12);
-      return acc;
-    }, 0);
+    const monthlyTotal = activeSubscriptions.reduce(
+      (acc, sub) => acc + getMonthlySubscriptionCost(sub),
+      0,
+    );
 
     const user = await prisma.user.findUnique({
       where: { id: userId },
@@ -222,6 +407,7 @@ export const getAnalytics = async (req, res, next) => {
 
     const subscriptions = await prisma.subscription.findMany({
       where: { userId, isActive: true },
+      include: { accounts: true },
     });
 
     const categoriesMap = {};
@@ -235,12 +421,7 @@ export const getAnalytics = async (req, res, next) => {
         };
       }
       categoriesMap[cat].count += 1;
-      // Normalize to monthly cost
-      if (sub.billingCycle === "MONTHLY") {
-        categoriesMap[cat].totalAmount += sub.price;
-      } else if (sub.billingCycle === "YEARLY") {
-        categoriesMap[cat].totalAmount += Math.round(sub.price / 12);
-      }
+      categoriesMap[cat].totalAmount += getMonthlySubscriptionCost(sub);
     });
 
     const breakdown = Object.entries(categoriesMap).map(([category, data]) => ({

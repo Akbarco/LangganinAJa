@@ -10,13 +10,21 @@ import { getBrandVisuals } from "@/constants/brands";
 
 interface SubscriptionCardProps {
   subscription: Subscription;
+  activeAccountCount?: number;
   onPress: () => void;
   onEdit: () => void;
   onDelete: () => void;
   onToggle: () => void;
 }
 
-export default function SubscriptionCard({ subscription, onPress, onEdit, onDelete, onToggle }: SubscriptionCardProps) {
+export default function SubscriptionCard({
+  subscription,
+  activeAccountCount = 0,
+  onPress,
+  onEdit,
+  onDelete,
+  onToggle,
+}: SubscriptionCardProps) {
   const { colors, isDark } = useTheme();
   const styles = useMemo(() => createStyles(colors, isDark), [colors, isDark]);
 
@@ -27,6 +35,8 @@ export default function SubscriptionCard({ subscription, onPress, onEdit, onDele
   const daysLabel = getDaysLabel(subscription.nextPaymentDate);
   const billingLabel = getBillingLabel(subscription.billingCycle);
   const isActive = subscription.isActive;
+  const accountMultiplier = activeAccountCount > 0 ? activeAccountCount : 1;
+  const totalPrice = subscription.price * accountMultiplier;
 
   // Inactive: everything gray except "Nonaktif" badge
   const grayedIcon = isDark ? "#4A4A5A" : "#C0C4CC";
@@ -75,6 +85,14 @@ export default function SubscriptionCard({ subscription, onPress, onEdit, onDele
             </View>
             <View style={[styles.dot, !isActive && { backgroundColor: grayedDot }]} />
             <Text style={[styles.billing, !isActive && { color: grayedText }]}>{billingLabel}</Text>
+            {activeAccountCount > 0 && (
+              <>
+                <View style={[styles.dot, !isActive && { backgroundColor: grayedDot }]} />
+                <Text style={[styles.billing, !isActive && { color: grayedText }]}>
+                  {activeAccountCount} akun
+                </Text>
+              </>
+            )}
           </View>
 
           <View style={styles.metaRow}>
@@ -87,9 +105,14 @@ export default function SubscriptionCard({ subscription, onPress, onEdit, onDele
 
         <View style={styles.priceContainer}>
           <Text style={[styles.price, !isActive && { color: grayedText }]}>
-            {formatCurrency(subscription.price)}
+            {formatCurrency(totalPrice)}
           </Text>
           <Text style={[styles.priceLabel, !isActive && { color: grayedDot }]}>/{billingLabel.toLowerCase()}</Text>
+          {activeAccountCount > 0 && (
+            <Text style={[styles.unitPriceLabel, !isActive && { color: grayedDot }]} numberOfLines={1}>
+              {activeAccountCount} x {formatCurrency(subscription.price)}
+            </Text>
+          )}
         </View>
       </View>
 
@@ -159,6 +182,7 @@ const createStyles = (c: ThemeColors, isDark: boolean) =>
     priceContainer: { alignItems: "flex-end", paddingTop: 2 },
     price: { color: c.text, fontSize: FontSize.md, fontWeight: "600" },
     priceLabel: { color: c.textMuted, fontSize: FontSize.xs - 1, marginTop: 2 },
+    unitPriceLabel: { color: c.textMuted, fontSize: FontSize.xs - 2, marginTop: 3, maxWidth: 112 },
     footer: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: Spacing.md, paddingBottom: Spacing.md, gap: Spacing.md },
     nextPaymentWrap: { flex: 1, flexDirection: "row", alignItems: "center", gap: 6 },
     nextPaymentText: { color: c.textMuted, fontSize: FontSize.xs },

@@ -9,15 +9,24 @@ export const markAsPaid = async (req, res, next) => {
     const userId = req.user.id;
     const { note } = req.body;
 
-    const subscription = await prisma.subscription.findUnique({ where: { id } });
+    const subscription = await prisma.subscription.findUnique({
+      where: { id },
+      include: { accounts: true },
+    });
 
     if (!subscription) throw new AppError("Subscription not found", 404);
     if (subscription.userId !== userId) throw new AppError("Unauthorized", 403);
 
     // 1. Catat pembayaran
+    const activeAccountCount = subscription.accounts.filter(
+      (account) => account.status === "ACTIVE"
+    ).length;
+    const amount =
+      subscription.price * (activeAccountCount > 0 ? activeAccountCount : 1);
+
     const payment = await prisma.paymentLog.create({
       data: {
-        amount: subscription.price,
+        amount,
         note: note || null,
         subscriptionId: id,
       },

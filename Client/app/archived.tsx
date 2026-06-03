@@ -25,13 +25,13 @@ export default function ArchivedScreen() {
     if (!pendingDelete) return;
     const sub = pendingDelete;
     setPendingDelete(null);
-    try { await deleteSubscription(sub.id); await fetchSummary(); Toast.show({ type: "success", text1: "Dihapus Permanen", text2: `${sub.name} telah dihapus` }); } catch (e: any) { Toast.show({ type: "error", text1: "Gagal menghapus", text2: e.message }); }
+    try { await deleteSubscription(sub.id); await fetchSummary(); } catch (e: any) { Toast.show({ type: "error", text1: "Gagal menghapus", text2: e.message }); }
   };
   const confirmActivate = async () => {
     if (!pendingActivate) return;
     const sub = pendingActivate;
     setPendingActivate(null);
-    try { await toggleActive(sub.id, true); await fetchSummary(); Toast.show({ type: "success", text1: "Diaktifkan Kembali", text2: `${sub.name} kini aktif lagi` }); } catch (e: any) { Toast.show({ type: "error", text1: "Gagal", text2: e.message }); }
+    try { await toggleActive(sub.id, true); await fetchSummary(); } catch (e: any) { Toast.show({ type: "error", text1: "Gagal", text2: e.message }); }
   };
 
   const renderEmpty = () => (

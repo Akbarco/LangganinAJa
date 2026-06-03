@@ -28,6 +28,12 @@ export const subscriptionSchema = z.object({
   startDate: z.string().min(1, "Tanggal mulai wajib diisi"),
   nextPaymentDate: z.string().min(1, "Tanggal pembayaran berikutnya wajib diisi"),
   currency: z.string().default("IDR"),
+  accountLimit: z
+    .number({ error: "Jumlah akun harus berupa angka" })
+    .int("Jumlah akun harus bilangan bulat")
+    .min(1, "Jumlah akun minimal 1")
+    .nullable()
+    .optional(),
 });
 
 export type RegisterInput = z.infer<typeof registerSchema>;

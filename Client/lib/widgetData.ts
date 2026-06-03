@@ -150,10 +150,12 @@ type UserRow = {
 };
 
 type SubRow = {
+  id: string;
   price: number;
   billing_cycle: "MONTHLY" | "YEARLY";
   is_active: number;
   currency: string;
+  active_accounts: number;
 };
 
 /**
@@ -167,13 +169,26 @@ export async function getWidgetSummary(userId: string): Promise<WidgetSummary> {
     );
 
     const subs = await db.getAllAsync<SubRow>(
-      "SELECT price, billing_cycle, is_active, currency FROM subscriptions WHERE user_id = ?",
+      `SELECT
+        s.id,
+        s.price,
+        s.billing_cycle,
+        s.is_active,
+        s.currency,
+        COALESCE(SUM(CASE WHEN sa.status = 'ACTIVE' THEN 1 ELSE 0 END), 0) as active_accounts
+       FROM subscriptions s
+       LEFT JOIN subscription_accounts sa ON sa.subscription_id = s.id
+       WHERE s.user_id = ?
+       GROUP BY s.id`,
       userId,
     );
 
     const active = subs.filter((s) => s.is_active === 1);
     const monthlyTotal = active.reduce((sum, s) => {
-      return sum + (s.billing_cycle === "MONTHLY" ? s.price : Math.round(s.price / 12));
+      const multiplier = s.active_accounts > 0 ? s.active_accounts : 1;
+      const baseMonthly =
+        s.billing_cycle === "MONTHLY" ? s.price : Math.round(s.price / 12);
+      return sum + baseMonthly * multiplier;
     }, 0);
 
     return {
@@ -195,6 +210,7 @@ type UpcomingRow = {
   price: number;
   currency: string;
   next_payment_date: string;
+  active_accounts: number;
 };
 
 /**
@@ -206,10 +222,18 @@ export async function getUpcomingPayments(
 ): Promise<UpcomingPayment[]> {
   return withLocalDb(async (db) => {
     const rows = await db.getAllAsync<UpcomingRow>(
-      `SELECT id, name, price, currency, next_payment_date
-       FROM subscriptions
-       WHERE user_id = ? AND is_active = 1
-       ORDER BY next_payment_date ASC
+      `SELECT
+        s.id,
+        s.name,
+        s.price,
+        s.currency,
+        s.next_payment_date,
+        COALESCE(SUM(CASE WHEN sa.status = 'ACTIVE' THEN 1 ELSE 0 END), 0) as active_accounts
+       FROM subscriptions s
+       LEFT JOIN subscription_accounts sa ON sa.subscription_id = s.id
+       WHERE s.user_id = ? AND s.is_active = 1
+       GROUP BY s.id
+       ORDER BY s.next_payment_date ASC
        LIMIT ?`,
       [userId, limit],
     );
@@ -217,7 +241,7 @@ export async function getUpcomingPayments(
     return rows.map((r) => ({
       id: r.id,
       name: r.name,
-      price: r.price,
+      price: r.price * (r.active_accounts > 0 ? r.active_accounts : 1),
       currency: r.currency,
       nextPaymentDate: r.next_payment_date,
       daysUntil: calcDaysUntil(r.next_payment_date),

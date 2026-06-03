@@ -48,7 +48,7 @@ export default function AddSubscriptionScreen() {
 
   const { control, handleSubmit, reset, setValue, watch, formState: { errors } } = useForm<SubscriptionInput>({
     resolver: zodResolver(subscriptionSchema as any),
-    defaultValues: { name: "", price: undefined as any, billingCycle: "MONTHLY", startDate: new Date().toISOString(), nextPaymentDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(), currency: "IDR" },
+    defaultValues: { name: "", price: undefined as any, billingCycle: "MONTHLY", startDate: new Date().toISOString(), nextPaymentDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(), currency: "IDR", accountLimit: null },
   });
 
   const billingCycle = watch("billingCycle");
@@ -58,9 +58,8 @@ export default function AddSubscriptionScreen() {
   const onSubmit = async (data: SubscriptionInput) => {
     setIsSubmitting(true);
     try {
-      const newSub = await createSubscription({ name: data.name, price: Number(data.price), billingCycle: data.billingCycle, category: selectedCategory, startDate: data.startDate, nextPaymentDate: data.nextPaymentDate, currency: data.currency });
+      const newSub = await createSubscription({ name: data.name, price: Number(data.price), billingCycle: data.billingCycle, category: selectedCategory, startDate: data.startDate, nextPaymentDate: data.nextPaymentDate, currency: data.currency, accountLimit: data.accountLimit ?? null });
       if (tempReceiptUri && newSub && newSub.id) await setReceipt(newSub.id, tempReceiptUri);
-      Toast.show({ type: "success", text1: "Berhasil", text2: `${data.name} telah ditambahkan` });
       reset(); setTempReceiptUri(null); setSelectedCategory("OTHER"); router.navigate("/(tabs)");
     } catch (e: any) { Toast.show({ type: "error", text1: "Gagal menambahkan", text2: e.message }); }
     finally { setIsSubmitting(false); }
@@ -88,6 +87,7 @@ export default function AddSubscriptionScreen() {
           <View>
             <Controller control={control} name="name" render={({ field: { onChange, onBlur, value } }) => (<Input label="Nama Langganan" icon="pricetag-outline" placeholder="contoh: Netflix, Spotify" onChangeText={onChange} onBlur={onBlur} value={value} error={errors.name?.message} />)} />
             <Controller control={control} name="price" render={({ field: { onChange, onBlur, value } }) => (<Input label="Harga (IDR)" icon="cash-outline" placeholder="contoh: 54.000" keyboardType="numeric" onChangeText={(t) => onChange(parseRupiahInput(t))} onBlur={onBlur} value={formatRupiahInput(value)} error={errors.price?.message} />)} />
+            <Controller control={control} name="accountLimit" render={({ field: { onChange, onBlur, value } }) => (<Input label="Jumlah Akun/Slot (Opsional)" icon="people-outline" placeholder="contoh: 3" keyboardType="numeric" onChangeText={(t) => { const clean = t.replace(/[^0-9]/g, ""); onChange(clean ? Number(clean) : null); }} onBlur={onBlur} value={value ? String(value) : ""} error={errors.accountLimit?.message} />)} />
 
             <View style={styles.fieldContainer}>
               <Text style={styles.label}>Siklus Tagihan</Text>

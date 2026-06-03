@@ -60,6 +60,8 @@ const widgetConfig: WithAndroidWidgetsParams = {
   ],
 };
 
+const reminderChannelId = "langganinaja-reminders";
+
 export default ({ config }: ConfigContext): ExpoConfig => ({
   ...config,
 
@@ -94,6 +96,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       foregroundImage: "./assets/images/adaptive-icon.png",
       backgroundColor: "#FFFFFF",
     },
+    permissions: ["POST_NOTIFICATIONS", "SCHEDULE_EXACT_ALARM"],
     edgeToEdgeEnabled: true,
     predictiveBackGestureEnabled: false,
     package: "com.akbar13.langganinaja",
@@ -112,6 +115,13 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     "@react-native-community/datetimepicker",
     "expo-secure-store",
     "expo-sqlite",
+    [
+      "expo-notifications",
+      {
+        color: "#2563EB",
+        defaultChannel: reminderChannelId,
+      },
+    ],
     // Widget plugin — generates AndroidManifest entries & XML files at prebuild
     ["react-native-android-widget", widgetConfig],
   ],

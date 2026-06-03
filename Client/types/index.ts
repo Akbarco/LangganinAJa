@@ -20,7 +20,22 @@ export interface Subscription {
   nextPaymentDate: string;
   isActive: boolean;
   currency: string;
+  accountLimit: number | null;
   userId: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type SubscriptionAccountStatus = "ACTIVE" | "INACTIVE";
+
+export interface SubscriptionAccount {
+  id: string;
+  subscriptionId: string;
+  name: string;
+  email: string | null;
+  holderName: string | null;
+  status: SubscriptionAccountStatus;
+  notes: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -62,6 +77,7 @@ export interface CreateSubscriptionPayload {
   startDate: string;
   nextPaymentDate: string;
   currency?: string;
+  accountLimit?: number | null;
 }
 
 export interface UpdateSubscriptionPayload {
@@ -73,5 +89,20 @@ export interface UpdateSubscriptionPayload {
   nextPaymentDate?: string;
   isActive?: boolean;
   currency?: string;
+  accountLimit?: number | null;
 }
 
+export interface CreateSubscriptionAccountPayload {
+  name: string;
+  email: string;
+  holderName?: string | null;
+  notes?: string | null;
+}
+
+export interface UpdateSubscriptionAccountPayload {
+  name?: string;
+  email?: string | null;
+  holderName?: string | null;
+  status?: SubscriptionAccountStatus;
+  notes?: string | null;
+}

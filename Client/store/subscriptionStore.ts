@@ -1,26 +1,62 @@
 import { create } from "zustand";
 import {
   Subscription,
+  SubscriptionAccount,
   SubscriptionSummary,
+  CreateSubscriptionAccountPayload,
   CreateSubscriptionPayload,
+  UpdateSubscriptionAccountPayload,
   UpdateSubscriptionPayload,
   PaymentLog,
 } from "@/types";
 import {
+  createLocalSubscriptionAccount,
   createLocalSubscription,
+  deleteLocalSubscriptionAccount,
   deleteLocalSubscription,
   getLocalPaymentHistory,
+  getLocalSubscriptionAccounts,
   getLocalSubscriptions,
   getLocalSummary,
   markLocalSubscriptionAsPaid,
+  updateLocalSubscriptionAccount,
   updateLocalSubscription,
 } from "@/lib/localDb";
-import { scheduleSubscriptionReminders, cancelSubscriptionReminders } from "@/lib/notifications";
+import {
+  scheduleSubscriptionReminders,
+  cancelSubscriptionReminders,
+} from "@/lib/notifications";
 import { scheduleWidgetSync } from "@/lib/widgetSync";
 import { useAuthStore } from "@/store/authStore";
 
+async function syncReminderForSubscription(subscription: Subscription) {
+  try {
+    if (!subscription.isActive) {
+      await cancelSubscriptionReminders(subscription.id);
+      return;
+    }
+
+    await scheduleSubscriptionReminders({
+      id: subscription.id,
+      name: subscription.name,
+      price: subscription.price,
+      currency: subscription.currency || "IDR",
+      nextPaymentDate: subscription.nextPaymentDate,
+    });
+  } catch (error) {
+    console.log("Gagal sinkron notifikasi", error);
+  }
+}
+
+async function syncRemindersForSubscriptions(subscriptions: Subscription[]) {
+  for (const subscription of subscriptions) {
+    await syncReminderForSubscription(subscription);
+  }
+}
+
 interface SubscriptionState {
   subscriptions: Subscription[];
+  accountsBySubscriptionId: Record<string, SubscriptionAccount[]>;
   summary: SubscriptionSummary | null;
   paymentHistory: PaymentLog[];
   isLoading: boolean;
@@ -35,11 +71,28 @@ interface SubscriptionState {
   toggleActive: (id: string, isActive: boolean) => Promise<void>;
   markAsPaid: (id: string, note?: string) => Promise<void>;
   fetchPaymentHistory: (id: string) => Promise<void>;
+  fetchSubscriptionAccounts: (subscriptionId: string) => Promise<void>;
+  createSubscriptionAccount: (
+    subscriptionId: string,
+    payload: CreateSubscriptionAccountPayload,
+  ) => Promise<SubscriptionAccount>;
+  updateSubscriptionAccount: (
+    subscriptionId: string,
+    accountId: string,
+    payload: UpdateSubscriptionAccountPayload,
+  ) => Promise<void>;
+  deleteSubscriptionAccount: (subscriptionId: string, accountId: string) => Promise<void>;
+  toggleSubscriptionAccount: (
+    subscriptionId: string,
+    accountId: string,
+    status: SubscriptionAccount["status"],
+  ) => Promise<void>;
   refresh: () => Promise<void>;
 }
 
 export const useSubscriptionStore = create<SubscriptionState>((set, get) => ({
   subscriptions: [],
+  accountsBySubscriptionId: {},
   summary: null,
   paymentHistory: [],
   isLoading: false,
@@ -56,6 +109,7 @@ export const useSubscriptionStore = create<SubscriptionState>((set, get) => ({
 
       const subscriptions = await getLocalSubscriptions(userId);
       set({ subscriptions, isLoading: false });
+      void syncRemindersForSubscriptions(subscriptions);
     } catch (error) {
       set({ isLoading: false });
       throw error;
@@ -86,18 +140,7 @@ export const useSubscriptionStore = create<SubscriptionState>((set, get) => ({
       subscriptions: [subscription, ...state.subscriptions],
     }));
 
-    // [FITUR BARU] Jadwalkan notifikasi H-7 dan H-1
-    try {
-      await scheduleSubscriptionReminders({
-        id: subscription.id,
-        name: subscription.name,
-        price: subscription.price,
-        currency: subscription.currency as any || "IDR",
-        nextPaymentDate: subscription.nextPaymentDate,
-      });
-    } catch (e) {
-      console.log("Gagal buat notifikasi", e);
-    }
+    await syncReminderForSubscription(subscription);
 
     await get().fetchSummary();
     scheduleWidgetSync(); // Real-time widget update
@@ -115,18 +158,7 @@ export const useSubscriptionStore = create<SubscriptionState>((set, get) => ({
       ),
     }));
 
-    // Update notifikasi jika datanya berubah
-    try {
-      await scheduleSubscriptionReminders({
-        id: subscription.id,
-        name: subscription.name,
-        price: subscription.price,
-        currency: subscription.currency as any || "IDR",
-        nextPaymentDate: subscription.nextPaymentDate,
-      });
-    } catch (e) {
-      console.log("Gagal buat notifikasi", e);
-    }
+    await syncReminderForSubscription(subscription);
 
     await get().fetchSummary();
     scheduleWidgetSync(); // Real-time widget update
@@ -139,6 +171,9 @@ export const useSubscriptionStore = create<SubscriptionState>((set, get) => ({
     await deleteLocalSubscription(userId, id);
     set((state) => ({
       subscriptions: state.subscriptions.filter((s) => s.id !== id),
+      accountsBySubscriptionId: Object.fromEntries(
+        Object.entries(state.accountsBySubscriptionId).filter(([key]) => key !== id),
+      ),
     }));
 
     // Batalin semua alarm sisa kalau langganan dihapus (Arsip)
@@ -181,11 +216,119 @@ export const useSubscriptionStore = create<SubscriptionState>((set, get) => ({
     }
   },
 
+  fetchSubscriptionAccounts: async (subscriptionId: string) => {
+    try {
+      const userId = useAuthStore.getState().user?.id;
+      if (!userId) {
+        set((state) => ({
+          accountsBySubscriptionId: {
+            ...state.accountsBySubscriptionId,
+            [subscriptionId]: [],
+          },
+        }));
+        return;
+      }
+
+      const accounts = await getLocalSubscriptionAccounts(userId, subscriptionId);
+      set((state) => ({
+        accountsBySubscriptionId: {
+          ...state.accountsBySubscriptionId,
+          [subscriptionId]: accounts,
+        },
+      }));
+    } catch {
+      set((state) => ({
+        accountsBySubscriptionId: {
+          ...state.accountsBySubscriptionId,
+          [subscriptionId]: [],
+        },
+      }));
+    }
+  },
+
+  createSubscriptionAccount: async (
+    subscriptionId: string,
+    payload: CreateSubscriptionAccountPayload,
+  ) => {
+    const userId = useAuthStore.getState().user?.id;
+    if (!userId) throw new Error("User belum login");
+
+    const account = await createLocalSubscriptionAccount(userId, subscriptionId, payload);
+    set((state) => ({
+      accountsBySubscriptionId: {
+        ...state.accountsBySubscriptionId,
+        [subscriptionId]: [
+          ...(state.accountsBySubscriptionId[subscriptionId] || []),
+          account,
+        ],
+      },
+    }));
+    await get().fetchSummary();
+    scheduleWidgetSync();
+    return account;
+  },
+
+  updateSubscriptionAccount: async (
+    subscriptionId: string,
+    accountId: string,
+    payload: UpdateSubscriptionAccountPayload,
+  ) => {
+    const userId = useAuthStore.getState().user?.id;
+    if (!userId) throw new Error("User belum login");
+
+    const account = await updateLocalSubscriptionAccount(
+      userId,
+      subscriptionId,
+      accountId,
+      payload,
+    );
+    set((state) => ({
+      accountsBySubscriptionId: {
+        ...state.accountsBySubscriptionId,
+        [subscriptionId]: (state.accountsBySubscriptionId[subscriptionId] || []).map((item) =>
+          item.id === accountId ? account : item,
+        ),
+      },
+    }));
+    await get().fetchSummary();
+    scheduleWidgetSync();
+  },
+
+  deleteSubscriptionAccount: async (subscriptionId: string, accountId: string) => {
+    const userId = useAuthStore.getState().user?.id;
+    if (!userId) throw new Error("User belum login");
+
+    await deleteLocalSubscriptionAccount(userId, subscriptionId, accountId);
+    set((state) => ({
+      accountsBySubscriptionId: {
+        ...state.accountsBySubscriptionId,
+        [subscriptionId]: (state.accountsBySubscriptionId[subscriptionId] || []).filter(
+          (item) => item.id !== accountId,
+        ),
+      },
+    }));
+    await get().fetchSummary();
+    scheduleWidgetSync();
+  },
+
+  toggleSubscriptionAccount: async (
+    subscriptionId: string,
+    accountId: string,
+    status: SubscriptionAccount["status"],
+  ) => {
+    await get().updateSubscriptionAccount(subscriptionId, accountId, { status });
+  },
+
   refresh: async () => {
     set({ isRefreshing: true });
     try {
       await get().fetchSubscriptions();
       await get().fetchSummary();
+      await Promise.all(
+        get().subscriptions.map((subscription) =>
+          get().fetchSubscriptionAccounts(subscription.id),
+        ),
+      );
     } finally {
       set({ isRefreshing: false });
     }

@@ -11,6 +11,15 @@ import { Ionicons } from "@expo/vector-icons";
 import { BorderRadius, FontSize, Spacing, ThemeColors } from "@/constants";
 import { useTheme } from "@/hooks/useTheme";
 
+const focusListeners = new Set<(id: string | null) => void>();
+let activeInputId: string | null = null;
+let inputIdSeed = 0;
+
+const setActiveInput = (id: string | null) => {
+  activeInputId = id;
+  focusListeners.forEach((listener) => listener(activeInputId));
+};
+
 interface InputProps extends TextInputProps {
   label: string;
   error?: string;
@@ -24,12 +33,26 @@ export default function Input({
   icon,
   isPassword = false,
   style,
+  onFocus,
+  onBlur,
   ...props
 }: InputProps) {
+  const inputId = React.useRef(`input-${++inputIdSeed}`).current;
   const [isFocused, setIsFocused] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
+
+  React.useEffect(() => {
+    const listener = (id: string | null) => setIsFocused(id === inputId);
+    focusListeners.add(listener);
+    listener(activeInputId);
+
+    return () => {
+      focusListeners.delete(listener);
+      if (activeInputId === inputId) setActiveInput(null);
+    };
+  }, [inputId]);
 
   return (
     <View style={styles.container}>
@@ -52,9 +75,16 @@ export default function Input({
         <TextInput
           style={[styles.input, style]}
           placeholderTextColor={colors.textMuted}
-          onFocus={() => setIsFocused(true)}
-          onBlur={() => setIsFocused(false)}
+          onFocus={(event) => {
+            setActiveInput(inputId);
+            onFocus?.(event);
+          }}
+          onBlur={(event) => {
+            if (activeInputId === inputId) setActiveInput(null);
+            onBlur?.(event);
+          }}
           secureTextEntry={isPassword && !showPassword}
+          selectionColor={colors.primary}
           {...props}
         />
         {isPassword && (
@@ -91,11 +121,6 @@ const createStyles = (c: ThemeColors) =>
     inputFocused: { 
       borderColor: c.primary, 
       backgroundColor: c.surfaceElevated,
-      shadowColor: c.primary,
-      shadowOffset: { width: 0, height: 0 },
-      shadowOpacity: 0.25,
-      shadowRadius: 6,
-      elevation: 4,
     },
     inputError: { borderColor: c.danger },
     icon: { marginRight: Spacing.sm },

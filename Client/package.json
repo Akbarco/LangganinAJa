@@ -3,7 +3,9 @@
   "main": "./index.ts",
   "version": "1.0.0",
   "scripts": {
-    "start": "expo start",
+    "start": "expo start --offline --max-workers 1",
+    "start:clear": "expo start -c --offline --max-workers 1",
+    "start:online": "expo start --max-workers 1",
     "android": "expo run:android",
     "ios": "expo run:ios",
     "web": "expo start --web"

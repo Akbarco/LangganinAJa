@@ -4,6 +4,7 @@ import {
   Text,
   StyleSheet,
   FlatList,
+  ScrollView,
   RefreshControl,
   ActivityIndicator,
   TextInput,
@@ -23,11 +24,16 @@ import { Spacing, FontSize, BorderRadius, ThemeColors } from "@/constants";
 import { useAuthStore } from "@/store/authStore";
 import { useSubscriptionStore } from "@/store/subscriptionStore";
 import { useTheme } from "@/hooks/useTheme";
-import { Subscription } from "@/types";
-import { daysUntil } from "@/lib/utils";
+import { Subscription, SubscriptionAccount } from "@/types";
+import { daysUntil, formatCurrency } from "@/lib/utils";
 
 type FilterType = "all" | "active" | "inactive";
 type SortType = "newest" | "name" | "price_asc" | "price_desc" | "due_soon";
+type AccountSortType = "newest" | "name" | "service" | "price_asc" | "price_desc";
+type HomeTab = "subscriptions" | "accounts";
+
+const SUBSCRIPTION_PREVIEW_LIMIT = 6;
+const ACCOUNT_PREVIEW_LIMIT = 12;
 
 const SORT_OPTIONS: {
   key: SortType;
@@ -47,6 +53,18 @@ const STATUS_FILTERS: { key: FilterType; label: string }[] = [
   { key: "inactive", label: "Nonaktif" },
 ];
 
+const ACCOUNT_SORT_OPTIONS: {
+  key: AccountSortType;
+  label: string;
+  icon: keyof typeof Ionicons.glyphMap;
+}[] = [
+  { key: "newest", label: "Terbaru", icon: "time-outline" },
+  { key: "name", label: "Nama Akun A-Z", icon: "person-outline" },
+  { key: "service", label: "Nama Langganan", icon: "albums-outline" },
+  { key: "price_asc", label: "Harga Termurah", icon: "trending-down-outline" },
+  { key: "price_desc", label: "Harga Termahal", icon: "trending-up-outline" },
+];
+
 const getSafeTimestamp = (value?: string) => {
   const timestamp = value ? new Date(value).getTime() : NaN;
   return Number.isFinite(timestamp) ? timestamp : 0;
@@ -60,13 +78,84 @@ const getGreetingMessage = () => {
   return "Selamat Malam";
 };
 
+function AccountPreviewCard({
+  account,
+  subscription,
+  onPress,
+  colors,
+  isDark,
+  fullWidth = false,
+}: {
+  account: SubscriptionAccount;
+  subscription: Subscription;
+  onPress: () => void;
+  colors: ThemeColors;
+  isDark: boolean;
+  fullWidth?: boolean;
+}) {
+  const isActive = account.status === "ACTIVE";
+  const s = stylesAccountPreview(colors, isDark);
+  return (
+    <TouchableOpacity
+      style={[
+        s.card,
+        fullWidth && s.cardFull,
+        !isActive && s.cardInactive,
+      ]}
+      onPress={onPress}
+      activeOpacity={0.8}
+    >
+      <View style={s.topRow}>
+        <View style={s.avatar}>
+          <Ionicons
+            name="person-outline"
+            size={17}
+            color={isActive ? colors.primary : colors.textMuted}
+          />
+        </View>
+        <View
+          style={[
+            s.statusPill,
+            isActive
+              ? s.statusActive
+              : s.statusInactive,
+          ]}
+        >
+          <Text
+            style={[
+              s.statusText,
+              { color: isActive ? colors.success : colors.danger },
+            ]}
+          >
+            {isActive ? "Aktif" : "Nonaktif"}
+          </Text>
+        </View>
+      </View>
+      <Text style={s.name} numberOfLines={1}>
+        {account.name}
+      </Text>
+      <Text style={s.service} numberOfLines={1}>
+        {subscription.name}
+      </Text>
+      <Text style={s.email} numberOfLines={1}>
+        {account.email || "Email Gmail belum diisi"}
+      </Text>
+      <Text style={s.price} numberOfLines={1}>
+        {formatCurrency(subscription.price)} / akun
+      </Text>
+    </TouchableOpacity>
+  );
+}
+
 export default function HomeScreen() {
   const { user, token } = useAuthStore();
   const {
     subscriptions,
+    accountsBySubscriptionId,
     summary,
     fetchSubscriptions,
     fetchSummary,
+    fetchSubscriptionAccounts,
     toggleActive,
     deleteSubscription,
     isLoading,
@@ -79,6 +168,10 @@ export default function HomeScreen() {
   const [searchQuery, setSearchQuery] = useState("");
   const [activeFilter, setActiveFilter] = useState<FilterType>("all");
   const [activeSort, setActiveSort] = useState<SortType>("newest");
+  const [accountSearchQuery, setAccountSearchQuery] = useState("");
+  const [accountFilter, setAccountFilter] = useState<FilterType>("all");
+  const [accountSort, setAccountSort] = useState<AccountSortType>("newest");
+  const [activeHomeTab, setActiveHomeTab] = useState<HomeTab>("subscriptions");
   const [isFilterModalVisible, setIsFilterModalVisible] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<Subscription | null>(null);
   const [pendingToggle, setPendingToggle] = useState<Subscription | null>(null);
@@ -88,7 +181,30 @@ export default function HomeScreen() {
       if (!token) return;
       fetchSubscriptions();
       fetchSummary();
-    }, [token]),
+    }, [token, fetchSubscriptions, fetchSummary]),
+  );
+
+  React.useEffect(() => {
+    if (!token || subscriptions.length === 0) return;
+    subscriptions.forEach((subscription) => {
+      fetchSubscriptionAccounts(subscription.id);
+    });
+  }, [token, subscriptions, fetchSubscriptionAccounts]);
+
+  const getActiveAccountCount = useCallback(
+    (subscriptionId: string) =>
+      (accountsBySubscriptionId[subscriptionId] || []).filter(
+        (account) => account.status === "ACTIVE",
+      ).length,
+    [accountsBySubscriptionId],
+  );
+
+  const getDisplayPrice = useCallback(
+    (subscription: Subscription) => {
+      const activeAccountCount = getActiveAccountCount(subscription.id);
+      return subscription.price * (activeAccountCount > 0 ? activeAccountCount : 1);
+    },
+    [getActiveAccountCount],
   );
 
   const filteredSubscriptions = useMemo(() => {
@@ -126,14 +242,14 @@ export default function HomeScreen() {
         result.sort((a, b) => {
           const o = cmp(a, b);
           if (o) return o;
-          return a.price - b.price;
+          return getDisplayPrice(a) - getDisplayPrice(b);
         });
         break;
       case "price_desc":
         result.sort((a, b) => {
           const o = cmp(a, b);
           if (o) return o;
-          return b.price - a.price;
+          return getDisplayPrice(b) - getDisplayPrice(a);
         });
         break;
       case "due_soon":
@@ -145,23 +261,90 @@ export default function HomeScreen() {
         break;
     }
     return result;
-  }, [subscriptions, searchQuery, activeFilter, activeSort]);
+  }, [subscriptions, searchQuery, activeFilter, activeSort, getDisplayPrice]);
 
+  const accountPreview = useMemo(() => {
+    return subscriptions
+      .flatMap((subscription) =>
+        (accountsBySubscriptionId[subscription.id] || []).map((account) => ({
+          account,
+          subscription,
+        })),
+      );
+  }, [subscriptions, accountsBySubscriptionId]);
+
+  const filteredAccounts = useMemo(() => {
+    const q = accountSearchQuery.trim().toLowerCase();
+    const result = accountPreview.filter(({ account, subscription }) => {
+      if (accountFilter === "active" && account.status !== "ACTIVE") return false;
+      if (accountFilter === "inactive" && account.status !== "INACTIVE") return false;
+      if (!q) return true;
+      return [
+        account.name,
+        account.email,
+        account.holderName,
+        account.notes,
+        subscription.name,
+      ].some((value) => value?.toLowerCase().includes(q));
+    });
+
+    return [...result].sort((a, b) => {
+      if (accountFilter === "all" && a.account.status !== b.account.status) {
+        return a.account.status === "ACTIVE" ? -1 : 1;
+      }
+      switch (accountSort) {
+        case "name":
+          return a.account.name.localeCompare(b.account.name);
+        case "service":
+          return a.subscription.name.localeCompare(b.subscription.name);
+        case "price_asc":
+          return a.subscription.price - b.subscription.price;
+        case "price_desc":
+          return b.subscription.price - a.subscription.price;
+        case "newest":
+        default:
+          return (
+            (getSafeTimestamp(b.account.updatedAt) || getSafeTimestamp(b.account.createdAt)) -
+            (getSafeTimestamp(a.account.updatedAt) || getSafeTimestamp(a.account.createdAt))
+          );
+      }
+    });
+  }, [accountFilter, accountPreview, accountSearchQuery, accountSort]);
+
+  const visibleAccountPreview = filteredAccounts.slice(0, ACCOUNT_PREVIEW_LIMIT);
+  const visibleSubscriptions = filteredSubscriptions.slice(0, SUBSCRIPTION_PREVIEW_LIMIT);
+
+  const isAccountsTab = activeHomeTab === "accounts";
   const hasActiveControls =
-    searchQuery.trim().length > 0 ||
-    activeFilter !== "all" ||
-    activeSort !== "newest";
+    isAccountsTab
+      ? accountSearchQuery.trim().length > 0 ||
+        accountFilter !== "all" ||
+        accountSort !== "newest"
+      : searchQuery.trim().length > 0 ||
+        activeFilter !== "all" ||
+        activeSort !== "newest";
   const activeFilterCount =
-    (activeFilter !== "all" ? 1 : 0) + (activeSort !== "newest" ? 1 : 0);
+    isAccountsTab
+      ? (accountFilter !== "all" ? 1 : 0) + (accountSort !== "newest" ? 1 : 0)
+      : (activeFilter !== "all" ? 1 : 0) + (activeSort !== "newest" ? 1 : 0);
   const activeFilterLabel =
-    STATUS_FILTERS.find((f) => f.key === activeFilter)?.label ?? "Semua";
+    STATUS_FILTERS.find((f) => f.key === (isAccountsTab ? accountFilter : activeFilter))?.label ?? "Semua";
   const activeSortLabel =
-    SORT_OPTIONS.find((s) => s.key === activeSort)?.label ?? "Terbaru";
+    isAccountsTab
+      ? ACCOUNT_SORT_OPTIONS.find((s) => s.key === accountSort)?.label ?? "Terbaru"
+      : SORT_OPTIONS.find((s) => s.key === activeSort)?.label ?? "Terbaru";
+  const currentSortOptions = isAccountsTab ? ACCOUNT_SORT_OPTIONS : SORT_OPTIONS;
 
   const clearControls = () => {
-    setSearchQuery("");
-    setActiveFilter("all");
-    setActiveSort("newest");
+    if (isAccountsTab) {
+      setAccountSearchQuery("");
+      setAccountFilter("all");
+      setAccountSort("newest");
+    } else {
+      setSearchQuery("");
+      setActiveFilter("all");
+      setActiveSort("newest");
+    }
     setIsFilterModalVisible(false);
   };
 
@@ -172,11 +355,6 @@ export default function HomeScreen() {
     try {
       await deleteSubscription(sub.id);
       await fetchSummary();
-      Toast.show({
-        type: "success",
-        text1: "Berhasil",
-        text2: `${sub.name} telah dihapus`,
-      });
     } catch (e: any) {
       Toast.show({ type: "error", text1: "Gagal", text2: e.message });
     }
@@ -189,11 +367,6 @@ export default function HomeScreen() {
     try {
       await toggleActive(sub.id, !sub.isActive);
       await fetchSummary();
-      Toast.show({
-        type: "success",
-        text1: sub.isActive ? "Dinonaktifkan" : "Diaktifkan",
-        text2: sub.name,
-      });
     } catch (e: any) {
       Toast.show({ type: "error", text1: "Gagal", text2: e.message });
     }
@@ -215,17 +388,20 @@ export default function HomeScreen() {
             />
             <TextInput
               style={styles.searchInput}
-              placeholder="Cari langganan..."
+              placeholder={isAccountsTab ? "Cari akun atau email..." : "Cari langganan..."}
               placeholderTextColor={colors.textMuted}
-              value={searchQuery}
-              onChangeText={setSearchQuery}
+              value={isAccountsTab ? accountSearchQuery : searchQuery}
+              onChangeText={isAccountsTab ? setAccountSearchQuery : setSearchQuery}
               autoCorrect={false}
               autoCapitalize="none"
               blurOnSubmit={false}
               returnKeyType="search"
             />
-            {!!searchQuery.trim() && (
-              <TouchableOpacity onPress={() => setSearchQuery("")} hitSlop={8}>
+            {(isAccountsTab ? accountSearchQuery : searchQuery).trim() && (
+              <TouchableOpacity
+                onPress={() => (isAccountsTab ? setAccountSearchQuery("") : setSearchQuery(""))}
+                hitSlop={8}
+              >
                 <Ionicons
                   name="close-circle"
                   size={18}
@@ -255,7 +431,7 @@ export default function HomeScreen() {
           <Text style={styles.filterSummaryText}>
             Status: {activeFilterLabel} — Urutkan: {activeSortLabel}
           </Text>
-          {(activeFilter !== "all" || activeSort !== "newest") && (
+          {hasActiveControls && (
             <TouchableOpacity style={styles.resetChip} onPress={clearControls}>
               <Text style={styles.resetChipText}>Reset</Text>
             </TouchableOpacity>
@@ -264,8 +440,109 @@ export default function HomeScreen() {
       </View>
       {summary && <SummaryCards summary={summary} />}
       <View style={styles.listLabelRow}>
-        <Text style={styles.listLabel}>Daftar Langganan</Text>
+        <TouchableOpacity
+          style={[
+            styles.tabButton,
+            activeHomeTab === "subscriptions" && styles.tabButtonActive,
+          ]}
+          onPress={() => setActiveHomeTab("subscriptions")}
+          activeOpacity={0.85}
+        >
+          <Text
+            style={[
+              styles.tabButtonText,
+              activeHomeTab === "subscriptions" && styles.tabButtonTextActive,
+            ]}
+          >
+            Daftar Langganan
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[
+            styles.tabButton,
+            activeHomeTab === "accounts" && styles.tabButtonActive,
+          ]}
+          onPress={() => setActiveHomeTab("accounts")}
+          activeOpacity={0.85}
+        >
+          <Text
+            style={[
+              styles.tabButtonText,
+              activeHomeTab === "accounts" && styles.tabButtonTextActive,
+            ]}
+          >
+            Daftar Akun
+          </Text>
+        </TouchableOpacity>
       </View>
+      {activeHomeTab === "subscriptions" ? (
+        <View style={styles.sectionMetaRow}>
+          <Text style={styles.accountsPreviewSubtitle}>
+            {filteredSubscriptions.length} langganan ditemukan
+          </Text>
+          {filteredSubscriptions.length > SUBSCRIPTION_PREVIEW_LIMIT && (
+            <TouchableOpacity
+              style={styles.viewAllButton}
+              onPress={() => router.push("/subscriptions" as any)}
+            >
+              <Text style={styles.viewAllButtonText}>Lihat semua</Text>
+              <Ionicons name="chevron-forward" size={15} color={colors.primary} />
+            </TouchableOpacity>
+          )}
+        </View>
+      ) : (
+        <View style={styles.accountsPreviewSection}>
+          <View style={styles.sectionMetaRow}>
+            <Text style={styles.accountsPreviewSubtitle}>
+              {filteredAccounts.length > 0
+                ? `${filteredAccounts.filter((item) => item.account.status === "ACTIVE").length} aktif dari ${filteredAccounts.length} akun`
+                : "Akun dari langganan akan tampil di sini"}
+            </Text>
+            {filteredAccounts.length > ACCOUNT_PREVIEW_LIMIT && (
+              <TouchableOpacity
+                style={styles.viewAllButton}
+                onPress={() => router.push("/accounts" as any)}
+              >
+                <Text style={styles.viewAllButtonText}>Lihat semua</Text>
+                <Ionicons name="chevron-forward" size={15} color={colors.primary} />
+              </TouchableOpacity>
+            )}
+          </View>
+          {filteredAccounts.length === 0 ? (
+            <TouchableOpacity
+              style={styles.emptyAccountsPreview}
+              onPress={() => {
+                if (hasActiveControls) {
+                  clearControls();
+                  return;
+                }
+                router.push("/add" as any);
+              }}
+              activeOpacity={0.8}
+            >
+              <Ionicons name={hasActiveControls ? "search-outline" : "people-outline"} size={20} color={colors.primary} />
+              <Text style={styles.emptyAccountsPreviewText}>
+                {hasActiveControls
+                  ? "Akun tidak ditemukan. Tap untuk reset pencarian."
+                  : "Tambahkan akun lewat detail langganan setelah paket dibuat."}
+              </Text>
+            </TouchableOpacity>
+          ) : (
+            <View style={styles.accountsPreviewGrid}>
+              {visibleAccountPreview.map(({ account, subscription }) => (
+                <AccountPreviewCard
+                  key={account.id}
+                  account={account}
+                  subscription={subscription}
+                  onPress={() => router.push(`/accounts/${account.id}` as any)}
+                  colors={colors}
+                  isDark={isDark}
+                />
+              ))}
+            </View>
+          )}
+        </View>
+      )}
     </View>
   );
 
@@ -321,7 +598,9 @@ export default function HomeScreen() {
           <Pressable style={styles.modalCard} onPress={() => {}}>
             <View style={styles.modalHeader}>
               <View>
-                <Text style={styles.modalTitle}>Filter Langganan</Text>
+                <Text style={styles.modalTitle}>
+                  {isAccountsTab ? "Filter Akun" : "Filter Langganan"}
+                </Text>
                 <Text style={styles.modalSubtitle}>
                   Atur status dan urutan daftar.
                 </Text>
@@ -344,19 +623,21 @@ export default function HomeScreen() {
                   key={f.key}
                   style={[
                     styles.modalOption,
-                    activeFilter === f.key && styles.modalOptionActive,
+                    (isAccountsTab ? accountFilter : activeFilter) === f.key && styles.modalOptionActive,
                   ]}
-                  onPress={() => setActiveFilter(f.key)}
+                  onPress={() =>
+                    isAccountsTab ? setAccountFilter(f.key) : setActiveFilter(f.key)
+                  }
                 >
                   <Text
                     style={[
                       styles.modalOptionText,
-                      activeFilter === f.key && styles.modalOptionTextActive,
+                      (isAccountsTab ? accountFilter : activeFilter) === f.key && styles.modalOptionTextActive,
                     ]}
                   >
                     {f.label}
                   </Text>
-                  {activeFilter === f.key && (
+                  {(isAccountsTab ? accountFilter : activeFilter) === f.key && (
                     <Ionicons
                       name="checkmark-circle"
                       size={18}
@@ -368,21 +649,25 @@ export default function HomeScreen() {
             </View>
             <View style={styles.modalSection}>
               <Text style={styles.modalSectionTitle}>Urutkan Berdasarkan</Text>
-              {SORT_OPTIONS.map((s) => (
+              {currentSortOptions.map((s) => (
                 <TouchableOpacity
                   key={s.key}
                   style={[
                     styles.modalOption,
-                    activeSort === s.key && styles.modalOptionActive,
+                    (isAccountsTab ? accountSort : activeSort) === s.key && styles.modalOptionActive,
                   ]}
-                  onPress={() => setActiveSort(s.key)}
+                  onPress={() =>
+                    isAccountsTab
+                      ? setAccountSort(s.key as AccountSortType)
+                      : setActiveSort(s.key as SortType)
+                  }
                 >
                   <View style={styles.modalOptionLeft}>
                     <Ionicons
                       name={s.icon}
                       size={17}
                       color={
-                        activeSort === s.key
+                        (isAccountsTab ? accountSort : activeSort) === s.key
                           ? colors.primary
                           : colors.textSecondary
                       }
@@ -390,13 +675,13 @@ export default function HomeScreen() {
                     <Text
                       style={[
                         styles.modalOptionText,
-                        activeSort === s.key && styles.modalOptionTextActive,
+                        (isAccountsTab ? accountSort : activeSort) === s.key && styles.modalOptionTextActive,
                       ]}
                     >
                       {s.label}
                     </Text>
                   </View>
-                  {activeSort === s.key && (
+                  {(isAccountsTab ? accountSort : activeSort) === s.key && (
                     <Ionicons
                       name="checkmark-circle"
                       size={18}
@@ -424,11 +709,12 @@ export default function HomeScreen() {
         </Pressable>
       </Modal>
       <FlatList
-        data={filteredSubscriptions}
+        data={activeHomeTab === "subscriptions" ? visibleSubscriptions : []}
         keyExtractor={(item) => item.id}
         renderItem={({ item }) => (
           <SubscriptionCard
             subscription={item}
+            activeAccountCount={getActiveAccountCount(item.id)}
             onPress={() => router.push(`/detail/${item.id}` as any)}
             onEdit={() => router.push(`/edit/${item.id}` as any)}
             onDelete={() => setPendingDelete(item)}
@@ -436,7 +722,7 @@ export default function HomeScreen() {
           />
         )}
         ListHeaderComponent={listHeader}
-        ListEmptyComponent={emptyState}
+        ListEmptyComponent={activeHomeTab === "subscriptions" ? emptyState : null}
         refreshControl={
           <RefreshControl
             refreshing={isRefreshing}
@@ -586,12 +872,139 @@ const createStyles = (c: ThemeColors, isDark: boolean) =>
     },
     listLabelRow: {
       flexDirection: "row",
-      justifyContent: "space-between",
       alignItems: "center",
+      gap: Spacing.sm,
       paddingHorizontal: Spacing.lg,
       marginTop: Spacing.xs,
     },
     listLabel: { color: c.text, fontSize: FontSize.lg, fontWeight: "600" },
+    tabButton: {
+      flex: 1,
+      minHeight: 44,
+      alignItems: "center",
+      justifyContent: "center",
+      borderRadius: BorderRadius.md,
+      borderWidth: 1,
+      borderColor: c.border,
+      backgroundColor: c.surface,
+      paddingHorizontal: Spacing.sm,
+    },
+    tabButtonActive: {
+      borderColor: c.primary,
+      backgroundColor: c.primary,
+    },
+    tabButtonText: {
+      color: c.textSecondary,
+      fontSize: FontSize.sm,
+      fontWeight: "700",
+    },
+    tabButtonTextActive: {
+      color: c.white,
+    },
+    sectionMetaRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      paddingHorizontal: Spacing.lg,
+      gap: Spacing.sm,
+    },
+    viewAllButton: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 3,
+      minHeight: 34,
+      paddingHorizontal: Spacing.sm,
+      borderRadius: BorderRadius.sm,
+      backgroundColor: c.primaryLight,
+    },
+    viewAllButtonText: {
+      color: c.primary,
+      fontSize: FontSize.xs,
+      fontWeight: "700",
+    },
+    accountsPreviewSection: {
+      gap: Spacing.sm,
+      marginTop: Spacing.xs,
+    },
+    accountsPreviewHeader: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      paddingHorizontal: Spacing.lg,
+      gap: Spacing.md,
+    },
+    accountsPreviewSubtitle: {
+      color: c.textMuted,
+      fontSize: FontSize.xs,
+      marginTop: 4,
+    },
+    accountsPreviewAdd: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 5,
+      minHeight: 36,
+      paddingHorizontal: Spacing.md,
+      borderRadius: BorderRadius.sm,
+      backgroundColor: c.primary,
+    },
+    accountsPreviewAddText: {
+      color: c.white,
+      fontSize: FontSize.xs,
+      fontWeight: "600",
+    },
+    emptyAccountsPreview: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: Spacing.sm,
+      minHeight: 58,
+      marginHorizontal: Spacing.lg,
+      paddingHorizontal: Spacing.md,
+      borderRadius: BorderRadius.md,
+      borderWidth: 1,
+      borderColor: c.border,
+      backgroundColor: c.surface,
+    },
+    emptyAccountsPreviewText: {
+      flex: 1,
+      color: c.textSecondary,
+      fontSize: FontSize.xs,
+      lineHeight: 18,
+    },
+    accountsPreviewGrid: {
+      flexDirection: "row",
+      flexWrap: "wrap",
+      paddingHorizontal: Spacing.lg,
+      gap: Spacing.sm,
+    },
+    accountsSheetOverlay: {
+      flex: 1,
+      justifyContent: "flex-end",
+      backgroundColor: c.overlay,
+    },
+    accountsSheet: {
+      maxHeight: "78%",
+      backgroundColor: c.background,
+      borderTopLeftRadius: BorderRadius.lg,
+      borderTopRightRadius: BorderRadius.lg,
+      padding: Spacing.lg,
+      borderWidth: 1,
+      borderColor: c.border,
+    },
+    accountsSheetHeader: {
+      flexDirection: "row",
+      justifyContent: "space-between",
+      alignItems: "flex-start",
+      gap: Spacing.md,
+      marginBottom: Spacing.md,
+    },
+    accountsSheetTitle: { color: c.text, fontSize: FontSize.lg, fontWeight: "700" },
+    accountsSheetSubtitle: {
+      color: c.textMuted,
+      fontSize: FontSize.xs,
+      marginTop: 4,
+    },
+    accountsSheetList: { gap: Spacing.sm, paddingBottom: Spacing.lg },
     listContent: { paddingBottom: 110 },
     loadingContainer: {
       flex: 1,
@@ -732,4 +1145,75 @@ const createStyles = (c: ThemeColors, isDark: boolean) =>
       backgroundColor: c.primary,
     },
     modalPrimaryBtnText: { color: c.white, fontWeight: "600" },
+  });
+
+const stylesAccountPreview = (c: ThemeColors, isDark: boolean) =>
+  StyleSheet.create({
+    card: {
+      width: "48.5%",
+      minHeight: 146,
+      padding: Spacing.md,
+      borderRadius: BorderRadius.md,
+      borderWidth: 1,
+      borderColor: c.border,
+      backgroundColor: c.surface,
+      gap: 7,
+    },
+    cardFull: {
+      width: "100%",
+      minHeight: 122,
+    },
+    cardInactive: {
+      backgroundColor: isDark ? "#13131F" : "#F3F4F6",
+      borderColor: isDark ? "#1E1E30" : "#E2E4E8",
+    },
+    topRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: Spacing.sm,
+    },
+    avatar: {
+      width: 34,
+      height: 34,
+      borderRadius: 10,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: c.primaryLight,
+    },
+    statusPill: {
+      paddingHorizontal: Spacing.sm,
+      paddingVertical: 4,
+      borderRadius: BorderRadius.full,
+    },
+    statusActive: {
+      backgroundColor: isDark ? "rgba(0,184,148,0.18)" : "rgba(22,163,74,0.1)",
+    },
+    statusInactive: {
+      backgroundColor: isDark ? "rgba(255,107,107,0.18)" : "rgba(220,38,38,0.1)",
+    },
+    statusText: {
+      fontSize: FontSize.xs - 1,
+      fontWeight: "700",
+    },
+    name: {
+      color: c.text,
+      fontSize: FontSize.sm,
+      fontWeight: "700",
+      marginTop: 2,
+    },
+    service: {
+      color: c.textSecondary,
+      fontSize: FontSize.xs,
+    },
+    email: {
+      color: c.textMuted,
+      fontSize: FontSize.xs,
+    },
+    price: {
+      color: c.primary,
+      fontSize: FontSize.xs,
+      fontWeight: "700",
+      marginTop: "auto",
+    },
   });

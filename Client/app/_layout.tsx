@@ -152,6 +152,9 @@ export default function RootLayout() {
           <Stack.Screen name="(tabs)" options={{ animation: "slide_from_right" }} />
           <Stack.Screen name="detail/[id]" options={{ presentation: "modal", animation: "slide_from_bottom" }} />
           <Stack.Screen name="edit/[id]" options={{ presentation: "modal", animation: "slide_from_bottom" }} />
+          <Stack.Screen name="accounts/index" options={{ animation: "slide_from_right" }} />
+          <Stack.Screen name="accounts/[id]" options={{ animation: "slide_from_right" }} />
+          <Stack.Screen name="subscriptions/index" options={{ animation: "slide_from_right" }} />
         </Stack>
       </AuthGuard>
       <Toast />
